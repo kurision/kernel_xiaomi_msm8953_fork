@@ -1,6 +1,7 @@
 &soc {
 	int_codec: sound {
 		status = "ok";
+		qcom,use-legacy-voice-cpu-dais;
 		qcom,msm-hs-micbias-type = "internal";
 		qcom,audio-routing =
 			"RX_BIAS", "MCLK",
