@@ -450,7 +450,18 @@ static unsigned long sugov_get_util(struct sugov_cpu *sg_cpu)
 	sg_cpu->max = max;
 	sg_cpu->bw_dl = cpu_bw_dl(rq);
 
+#ifdef CONFIG_SCHED_TUNE
 	return stune_util(sg_cpu->cpu, 0, &sg_cpu->walt_load);
+#else
+	/*
+	 * Without schedtune, stune_util() falls back to PELT. Keep the WALT
+	 * frequency signal and apply the rq's uclamp aggregate instead.
+	 */
+	return uclamp_rq_util_with(rq,
+			min_t(unsigned long, max,
+			      cpu_util_freq(sg_cpu->cpu, &sg_cpu->walt_load)),
+			NULL);
+#endif
 }
 #else
 static unsigned long sugov_get_util(struct sugov_cpu *sg_cpu)
