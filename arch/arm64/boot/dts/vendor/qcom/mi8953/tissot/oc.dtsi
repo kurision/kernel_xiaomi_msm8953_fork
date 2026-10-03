@@ -1,0 +1,396 @@
+/*
+ * CPU and GPU overclock / underclock for tissot.
+ *
+ * CPU: 480 MHz - 2400 MHz (stock 652.8 - 2016 MHz on speed bin 2)
+ * GPU: 100 MHz - 725 MHz  (stock 133.3 - 650 MHz)
+ *
+ * All clusters and the CCI share the C0 HFPLL, so every CPU table below
+ * has one entry per CPR corner. Corners 12-15 sit above the fused Turbo
+ * corner (2016 MHz); cpr4-apss-regulator extrapolates their open-loop
+ * voltage and target quotients along the NOM -> Turbo slope.
+ *
+ * See docs/oc-uc.md for the reasoning behind each value.
+ */
+
+/* CPU clock: CPR corner per cluster / CCI frequency */
+#define TISSOT_CL_FMAX			\
+	<          0  0>,			\
+	<  480000000  1>,			\
+	<  576000000  2>,			\
+	<  652800000  3>,			\
+	<  806400000  4>,			\
+	< 1036800000  5>,			\
+	< 1248000000  6>,			\
+	< 1401600000  7>,			\
+	< 1689600000  8>,			\
+	< 1804800000  9>,			\
+	< 1958400000 10>,			\
+	< 2016000000 11>,			\
+	< 2150400000 12>,			\
+	< 2208000000 13>,			\
+	< 2304000000 14>,			\
+	< 2400000000 15>
+
+/* CCI runs at HFPLL / 2.5 */
+#define TISSOT_CCI_FMAX			\
+	<          0  0>,			\
+	<  192000000  1>,			\
+	<  230400000  2>,			\
+	<  261120000  3>,			\
+	<  322560000  4>,			\
+	<  414720000  5>,			\
+	<  499200000  6>,			\
+	<  560640000  7>,			\
+	<  675840000  8>,			\
+	<  721920000  9>,			\
+	<  783360000 10>,			\
+	<  806400000 11>,			\
+	<  860160000 12>,			\
+	<  883200000 13>,			\
+	<  921600000 14>,			\
+	<  960000000 15>
+
+&clock_cpu {
+	qcom,speed0-bin-v0-cl = TISSOT_CL_FMAX;
+	qcom,speed0-bin-v0-cci = TISSOT_CCI_FMAX;
+	qcom,speed2-bin-v0-cl = TISSOT_CL_FMAX;
+	qcom,speed2-bin-v0-cci = TISSOT_CCI_FMAX;
+	qcom,speed6-bin-v0-cl = TISSOT_CL_FMAX;
+	qcom,speed6-bin-v0-cci = TISSOT_CCI_FMAX;
+	qcom,speed7-bin-v0-cl = TISSOT_CL_FMAX;
+	qcom,speed7-bin-v0-cci = TISSOT_CCI_FMAX;
+};
+
+&msm_cpufreq {
+	qcom,cpufreq-table =
+		 <  480000 >,
+		 <  576000 >,
+		 <  652800 >,
+		 <  806400 >,
+		 < 1036800 >,
+		 < 1248000 >,
+		 < 1401600 >,
+		 < 1689600 >,
+		 < 1804800 >,
+		 < 1958400 >,
+		 < 2016000 >,
+		 < 2150400 >,
+		 < 2208000 >,
+		 < 2304000 >,
+		 < 2400000 >;
+};
+
+/*
+ * CPR: every populated speed bin (0, 2, 6, 7) gets the same 15 corners,
+ * so all per-corner properties below use the single-tuple form that
+ * applies to every fuse combo.
+ */
+&apc_vreg {
+	regulator-max-microvolt = <15>;
+
+	qcom,cpr-speed-bin-corners = <15 0 15 0 0 0 15 15>;
+	qcom,cpr-corners =
+		/* Speed bin 0 */
+		<15 15 15 15 15 15 15 15>,
+
+		/* Speed bin 1 */
+		<0 0 0 0 0 0 0 0>,
+
+		/* Speed bin 2 */
+		<15 15 15 15 15 15 15 15>,
+
+		/* Speed bin 3..5 */
+		<0 0 0 0 0 0 0 0>,
+		<0 0 0 0 0 0 0 0>,
+		<0 0 0 0 0 0 0 0>,
+
+		/* Speed bin 6 */
+		<15 15 15 15 15 15 15 15>,
+
+		/* Speed bin 7 */
+		<15 15 15 15 15 15 15 15>;
+
+	/* LowSVS 652.8, SVS 1036.8, NOM 1689.6, Turbo 2016 MHz */
+	qcom,cpr-corner-fmax-map = <3 5 8 11>;
+
+	qcom,corner-frequencies =
+		< 480000000  576000000  652800000  806400000 1036800000
+		 1248000000 1401600000 1689600000 1804800000 1958400000
+		 2016000000 2150400000 2208000000 2304000000 2400000000>;
+
+	qcom,cpr-voltage-ceiling =
+		< 715000  715000  715000  790000  790000
+		  790000  860000  865000  920000  990000
+		 1065000 1065000 1090000 1115000 1140000>;
+
+	qcom,cpr-voltage-floor =
+		< 500000  500000  500000  500000  500000
+		  500000  500000  500000  500000  500000
+		  500000  500000  500000  500000  500000>;
+
+	qcom,cpr-floor-to-ceiling-max-range =
+		<  50000   50000   50000   50000   50000
+		   50000   50000   50000   50000   50000
+		   50000   50000   50000   50000   50000>;
+
+	/*
+	 * Misc fuse 0..1. Stock adds 30 mV at 1401.6 MHz for misc fuse 1;
+	 * the overclocked corners get extra margin on top of the
+	 * extrapolated voltage.
+	 */
+	qcom,cpr-misc-fuse-voltage-adjustment =
+		<      0       0       0       0       0
+		       0       0       0       0       0
+		       0   15000   20000   25000   30000>,
+		<      0       0       0       0       0
+		       0   30000       0       0       0
+		       0   15000   20000   25000   30000>;
+
+	qcom,mem-acc-voltage =
+		<1 1 1 1 1 1 2 2 2 2 2 2 2 2 2>;
+
+	/* 1958.4 MHz, as with the stock corner 6 */
+	qcom,cpr-aging-ref-corner = <10>;
+};
+
+/* GPU clock: 725 MHz shares the Turbo corner with 650 MHz */
+&clock_gcc_gfx {
+	qcom,gfxfreq-corner =
+		 <         0   0 >,
+		 < 133330000   1 >,  /* Min SVS   */
+		 < 216000000   2 >,  /* Low SVS   */
+		 < 320000000   3 >,  /* SVS       */
+		 < 400000000   4 >,  /* SVS Plus  */
+		 < 510000000   5 >,  /* NOM       */
+		 < 560000000   6 >,  /* Nom Plus  */
+		 < 650000000   7 >,  /* Turbo     */
+		 < 725000000   7 >;  /* Turbo     */
+};
+
+/* Keep in sync with qcom,gpu-pwrlevels below, minus the XO level */
+&gpu_opp_table {
+	opp-725 { opp-hz = /bits/ 64 < 725000000 >; };
+	opp-100 { opp-hz = /bits/ 64 < 100000000 >; };
+};
+
+&msm_gpu {
+	/*
+	 * 320 MHz. kgsl restarts at this level on every wake from
+	 * slumber; at 650 MHz the governor rarely gets a sample window
+	 * to step down before the GPU idles again.
+	 */
+	qcom,initial-pwrlevel = <5>;
+
+	/* 400 MHz, as stock */
+	qcom,ca-target-pwrlevel = <4>;
+
+	/* KGSL_MAX_PWRLEVELS is 10, XO included */
+	/delete-node/ qcom,gpu-pwrlevels;
+	qcom,gpu-pwrlevels {
+		#address-cells = <1>;
+		#size-cells = <0>;
+
+		compatible = "qcom,gpu-pwrlevels";
+
+		/* TURBO+ */
+		qcom,gpu-pwrlevel@0 {
+			reg = <0>;
+			qcom,gpu-freq = <725000000>;
+			qcom,bus-freq = <10>;
+			qcom,bus-min = <10>;
+			qcom,bus-max = <10>;
+		};
+
+		/* TURBO */
+		qcom,gpu-pwrlevel@1 {
+			reg = <1>;
+			qcom,gpu-freq = <650000000>;
+			qcom,bus-freq = <10>;
+			qcom,bus-min = <10>;
+			qcom,bus-max = <10>;
+		};
+
+		/* NOM+ */
+		qcom,gpu-pwrlevel@2 {
+			reg = <2>;
+			qcom,gpu-freq = <560000000>;
+			qcom,bus-freq = <10>;
+			qcom,bus-min = <8>;
+			qcom,bus-max = <10>;
+		};
+
+		/* NOM */
+		qcom,gpu-pwrlevel@3 {
+			reg = <3>;
+			qcom,gpu-freq = <510000000>;
+			qcom,bus-freq = <9>;
+			qcom,bus-min = <6>;
+			qcom,bus-max = <10>;
+		};
+
+		/* SVS+ */
+		qcom,gpu-pwrlevel@4 {
+			reg = <4>;
+			qcom,gpu-freq = <400000000>;
+			qcom,bus-freq = <7>;
+			qcom,bus-min = <5>;
+			qcom,bus-max = <8>;
+		};
+
+		/* SVS */
+		qcom,gpu-pwrlevel@5 {
+			reg = <5>;
+			qcom,gpu-freq = <320000000>;
+			qcom,bus-freq = <4>;
+			qcom,bus-min = <2>;
+			qcom,bus-max = <6>;
+		};
+
+		/* Low SVS */
+		qcom,gpu-pwrlevel@6 {
+			reg = <6>;
+			qcom,gpu-freq = <216000000>;
+			qcom,bus-freq = <1>;
+			qcom,bus-min = <1>;
+			qcom,bus-max = <4>;
+		};
+
+		/* Min SVS */
+		qcom,gpu-pwrlevel@7 {
+			reg = <7>;
+			qcom,gpu-freq = <133300000>;
+			qcom,bus-freq = <1>;
+			qcom,bus-min = <1>;
+			qcom,bus-max = <4>;
+		};
+
+		/* Min SVS, underclocked */
+		qcom,gpu-pwrlevel@8 {
+			reg = <8>;
+			qcom,gpu-freq = <100000000>;
+			qcom,bus-freq = <1>;
+			qcom,bus-min = <1>;
+			qcom,bus-max = <4>;
+		};
+
+		/* XO */
+		qcom,gpu-pwrlevel@9 {
+			reg = <9>;
+			qcom,gpu-freq = <19200000>;
+			qcom,bus-freq = <0>;
+			qcom,bus-min = <0>;
+			qcom,bus-max = <0>;
+		};
+	};
+};
+
+/*
+ * Cold-temperature voltage floors (low_limits_floor). Cooling states are
+ * indexes into the frequency tables, so keep them on the stock
+ * frequencies: CPU 1401.6 MHz, GPU 510 MHz.
+ */
+#define TISSOT_LOWF_FLOOR(zone)					\
+	zone {							\
+		cooling-maps {					\
+			cpu0_vdd_cdev {				\
+				cooling-device = <&CPU0		\
+					(THERMAL_MAX_LIMIT - 6)		\
+					(THERMAL_MAX_LIMIT - 6)>;	\
+			};					\
+			gpu_vdd_cdev {				\
+				cooling-device = <&msm_gpu 3 3>;	\
+			};					\
+		};						\
+	}
+
+&thermal_zones {
+	TISSOT_LOWF_FLOOR(mdm-core-lowf);
+	TISSOT_LOWF_FLOOR(qdsp-lowf);
+	TISSOT_LOWF_FLOOR(camera-lowf);
+	TISSOT_LOWF_FLOOR(apc1-cpu0-lowf);
+	TISSOT_LOWF_FLOOR(apc1-cpu1-lowf);
+	TISSOT_LOWF_FLOOR(apc1-cpu2-lowf);
+	TISSOT_LOWF_FLOOR(apc1-cpu3-lowf);
+	TISSOT_LOWF_FLOOR(apc1-l2-lowf);
+	TISSOT_LOWF_FLOOR(apc0-cpu0-lowf);
+	TISSOT_LOWF_FLOOR(apc0-cpu1-lowf);
+	TISSOT_LOWF_FLOOR(apc0-cpu2-lowf);
+	TISSOT_LOWF_FLOOR(apc0-cpu3-lowf);
+	TISSOT_LOWF_FLOOR(apc0-l2-lowf);
+	TISSOT_LOWF_FLOOR(gpu0-lowf);
+	TISSOT_LOWF_FLOOR(gpu1-lowf);
+};
+
+/*
+ * Energy model: add the underclock steps. The legacy EM rescales every row
+ * by policy max / last row (2400 MHz), so the last row must stay 2400000.
+ * 480 - 806.4 MHz share the LowSVS/SVS voltage, so power follows frequency.
+ */
+&CPU_COST_0 {
+	busy-cost-data = <
+		 480000   3
+		 576000   4
+		 652800   5
+		 806400   7
+		 883200   8
+		1036800  10
+		1248000  13
+		1401600  16
+		1536000  19
+		1689600  22
+		1804800  26
+		1843200  27
+		1958400  33
+		2016000  36
+		2150400  43
+		2208000  44
+		2304000  54
+		2400000  65
+	>;
+};
+
+&CLUSTER_COST_0 {
+	busy-cost-data = <
+		 480000   66
+		 576000   68
+		 652800   69
+		 806400   71
+		 883200   72
+		1036800   74
+		1248000   77
+		1401600   80
+		1536000   90
+		1689600  100
+		1804800  110
+		1843200  120
+		1958400  130
+		2016000  140
+		2150400  150
+		2208000  160
+		2304000  170
+		2400000  180
+	>;
+};
+
+&CLUSTER_COST_1 {
+	busy-cost-data = <
+		 480000    3
+		 576000    4
+		 652800    5
+		 806400    7
+		 883200    8
+		1036800   10
+		1248000   13
+		1401600   16
+		1536000   85
+		1689600   95
+		1804800  105
+		1843200  115
+		1958400  125
+		2016000  135
+		2150400  145
+		2208000  155
+		2304000  165
+		2400000  175
+	>;
+};
