@@ -759,6 +759,31 @@ static int cpr4_apss_parse_misc_fuse_voltage_adjustments(
 }
 
 /**
+ * cpr4_apss_extrapolate() - performs linear extrapolation
+ * @x1		Lower known x value
+ * @y1		Lower known y value
+ * @x2		Upper known x value
+ * @y2		Upper known y value
+ * @x		x value beyond x2
+ *
+ * Returns y where (x, y) falls on the line through (x1, y1) and (x2, y2)
+ * extended past x2.  It is required that x1 < x2, y1 <= y2, and x > x2.  If
+ * these conditions are not met, then y2 will be returned.
+ */
+static u64 cpr4_apss_extrapolate(u64 x1, u64 y1, u64 x2, u64 y2, u64 x)
+{
+	u64 temp;
+
+	if (x1 >= x2 || y1 > y2 || x <= x2)
+		return y2;
+
+	temp = (x - x2) * (y2 - y1);
+	do_div(temp, (u32)(x2 - x1));
+
+	return y2 + temp;
+}
+
+/**
  * cpr4_apss_calculate_open_loop_voltages() - calculate the open-loop
  *		voltage for each corner of a CPR3 regulator
  * @vreg:		Pointer to the CPR3 regulator
@@ -855,19 +880,15 @@ static int cpr4_apss_calculate_open_loop_voltages(struct cpr3_regulator *vreg)
 		goto done;
 	}
 
-	/* Determine highest corner mapped to each fuse corner */
-	j = vreg->fuse_corner_count - 1;
-	for (i = vreg->corner_count - 1; i >= 0; i--) {
-		if (vreg->corner[i].cpr_fuse_corner == j) {
-			fmax_corner[j] = i;
-			j--;
-		}
-	}
-	if (j >= 0) {
-		cpr3_err(vreg, "invalid fuse corner mapping\n");
-		rc = -EINVAL;
-		goto done;
-	}
+	/*
+	 * Determine the Fmax corner of each fuse corner from
+	 * qcom,cpr-corner-fmax-map. Corners above the highest fuse corner
+	 * Fmax are also mapped to the highest fuse corner, so scanning
+	 * cpr_fuse_corner would anchor its fused voltage at the wrong
+	 * frequency.
+	 */
+	for (i = 0; i < vreg->fuse_corner_count; i++)
+		fmax_corner[i] = vreg->fuse_corner_map[i];
 
 	/*
 	 * Interpolation is not possible for corners mapped to the lowest fuse
@@ -888,6 +909,15 @@ static int cpr4_apss_calculate_open_loop_voltages(struct cpr3_regulator *vreg)
 				freq_low, volt_low, freq_high, volt_high,
 				vreg->corner[j].proc_freq);
 	}
+
+	/* Extrapolate voltages for corners above the highest fuse corner. */
+	i = vreg->fuse_corner_count - 1;
+	for (j = fmax_corner[i] + 1; i > 0 && j < vreg->corner_count; j++)
+		vreg->corner[j].open_loop_volt = cpr4_apss_extrapolate(
+			vreg->corner[fmax_corner[i - 1]].proc_freq,
+			fuse_volt[i - 1],
+			vreg->corner[fmax_corner[i]].proc_freq, fuse_volt[i],
+			vreg->corner[j].proc_freq);
 
 done:
 	if (rc == 0) {
@@ -1105,19 +1135,13 @@ static int cpr4_apss_calculate_target_quotients(struct cpr3_regulator *vreg)
 				vreg, volt_adjust, volt_adjust_fuse, ro_scale);
 	}
 
-	/* Determine highest corner mapped to each fuse corner */
-	j = vreg->fuse_corner_count - 1;
-	for (i = vreg->corner_count - 1; i >= 0; i--) {
-		if (vreg->corner[i].cpr_fuse_corner == j) {
-			fmax_corner[j] = i;
-			j--;
-		}
-	}
-	if (j >= 0) {
-		cpr3_err(vreg, "invalid fuse corner mapping\n");
-		rc = -EINVAL;
-		goto done;
-	}
+	/*
+	 * Determine the Fmax corner of each fuse corner from
+	 * qcom,cpr-corner-fmax-map; see
+	 * cpr4_apss_calculate_open_loop_voltages().
+	 */
+	for (i = 0; i < vreg->fuse_corner_count; i++)
+		fmax_corner[i] = vreg->fuse_corner_map[i];
 
 	/*
 	 * Interpolation is not possible for corners mapped to the lowest fuse
@@ -1188,6 +1212,15 @@ static int cpr4_apss_calculate_target_quotients(struct cpr3_regulator *vreg)
 				freq_low, quot_low[i], freq_high, quot_high[i],
 				vreg->corner[j].proc_freq);
 	}
+
+	/* Extrapolate quotients for corners above the highest fuse corner. */
+	i = vreg->fuse_corner_count - 1;
+	ro = fuse->ro_sel[i];
+	for (j = fmax_corner[i] + 1; i > 0 && j < vreg->corner_count; j++)
+		vreg->corner[j].target_quot[ro] = cpr4_apss_extrapolate(
+			vreg->corner[fmax_corner[i - 1]].proc_freq,
+			quot_low[i], vreg->corner[fmax_corner[i]].proc_freq,
+			quot_high[i], vreg->corner[j].proc_freq);
 
 	/* Perform per-corner target quotient adjustment */
 	for (i = 0; i < vreg->corner_count; i++) {
