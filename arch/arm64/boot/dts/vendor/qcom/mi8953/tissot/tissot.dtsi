@@ -10,3 +10,4 @@
 #include "pinctrl.dtsi"
 #include "fingerprint.dtsi"
 #include "pmic.dtsi"
+#include "oc.dtsi"
