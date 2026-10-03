@@ -16,6 +16,7 @@
 #include <linux/cpumask.h>
 #include <linux/suspend.h>
 #include <linux/clk.h>
+#include <linux/clk/msm8953-cpu-uv.h>
 #include <linux/err.h>
 #include <linux/platform_device.h>
 #include <linux/of.h>
@@ -299,6 +300,9 @@ static struct notifier_block msm_cpufreq_pm_notifier = {
 
 static struct freq_attr *msm_freq_attr[] = {
 	&cpufreq_freq_attr_scaling_available_freqs,
+#ifdef CONFIG_MSM8953_CPU_VOLTAGE_CONTROL
+	&msm8953_uv_mv_table,
+#endif
 	NULL,
 };
 
