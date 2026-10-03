@@ -24,6 +24,8 @@
 #include <linux/sort.h>
 #include <linux/string.h>
 #include <linux/uaccess.h>
+#include <linux/regulator/consumer.h>
+#include <linux/regulator/cpr3-uv.h>
 #include <linux/regulator/driver.h>
 #include <linux/regulator/machine.h>
 #include <linux/regulator/of_regulator.h>
@@ -4244,6 +4246,95 @@ done:
 
 	return rc;
 }
+
+/**
+ * cpr3_regulator_get_corner_limits() - get the floor and ceiling voltage of a
+ *		corner of a CPR3 regulator
+ * @regulator:		Consumer handle of the cpr3-regulator
+ * @corner:		Voltage corner (offset by CPR3_CORNER_OFFSET)
+ * @floor_volt:		Filled with the floor voltage in microvolts
+ * @ceiling_volt:	Filled with the ceiling voltage in microvolts
+ *
+ * Return: 0 on success, errno on failure
+ */
+int cpr3_regulator_get_corner_limits(struct regulator *regulator, int corner,
+				     int *floor_volt, int *ceiling_volt)
+{
+	struct cpr3_regulator *vreg = regulator_get_drvdata(regulator);
+	struct cpr3_controller *ctrl;
+
+	if (!vreg)
+		return -ENODEV;
+
+	corner -= CPR3_CORNER_OFFSET;
+	if (corner < 0 || corner >= vreg->corner_count)
+		return -EINVAL;
+
+	ctrl = vreg->thread->ctrl;
+	mutex_lock(&ctrl->lock);
+	*floor_volt = vreg->corner[corner].floor_volt;
+	*ceiling_volt = vreg->corner[corner].ceiling_volt;
+	mutex_unlock(&ctrl->lock);
+
+	return 0;
+}
+EXPORT_SYMBOL(cpr3_regulator_get_corner_limits);
+
+/**
+ * cpr3_regulator_set_corner_ceiling() - change the ceiling voltage of a corner
+ *		of a CPR3 regulator
+ * @regulator:		Consumer handle of the cpr3-regulator
+ * @corner:		Voltage corner (offset by CPR3_CORNER_OFFSET)
+ * @ceiling_volt:	New ceiling voltage in microvolts
+ *
+ * The ceiling is rounded up to the controller voltage step. The floor is
+ * lowered to the new ceiling when needed and restored to its original value
+ * when the ceiling is raised again. The open-loop and last known voltages are
+ * kept within the new range, and the controller state is updated so that the
+ * new limits take effect immediately.
+ *
+ * Return: 0 on success, errno on failure
+ */
+int cpr3_regulator_set_corner_ceiling(struct regulator *regulator, int corner,
+				      int ceiling_volt)
+{
+	struct cpr3_regulator *vreg = regulator_get_drvdata(regulator);
+	struct cpr3_controller *ctrl;
+	struct cpr3_corner *c;
+	int rc = 0;
+
+	if (!vreg)
+		return -ENODEV;
+
+	corner -= CPR3_CORNER_OFFSET;
+	if (corner < 0 || corner >= vreg->corner_count || ceiling_volt <= 0)
+		return -EINVAL;
+
+	ctrl = vreg->thread->ctrl;
+	mutex_lock(&ctrl->lock);
+
+	c = &vreg->corner[corner];
+	if (!c->default_floor_volt)
+		c->default_floor_volt = c->floor_volt;
+
+	c->ceiling_volt = CPR3_ROUND(ceiling_volt, ctrl->step_volt);
+	c->floor_volt = min(c->default_floor_volt, c->ceiling_volt);
+	c->open_loop_volt = clamp(c->open_loop_volt, c->floor_volt,
+				  c->ceiling_volt);
+	c->last_volt = clamp(c->last_volt, c->floor_volt, c->ceiling_volt);
+
+	if (vreg->vreg_enabled) {
+		rc = cpr3_regulator_update_ctrl_state(ctrl);
+		if (rc)
+			cpr3_err(vreg, "could not update CPR state, rc=%d\n",
+				 rc);
+	}
+
+	mutex_unlock(&ctrl->lock);
+
+	return rc;
+}
+EXPORT_SYMBOL(cpr3_regulator_set_corner_ceiling);
 
 /**
  * cpr3_regulator_get_voltage() - get the voltage corner for the CPR3 regulator
