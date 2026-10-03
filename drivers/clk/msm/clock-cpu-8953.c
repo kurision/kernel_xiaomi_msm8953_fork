@@ -18,7 +18,9 @@
 #include <linux/io.h>
 #include <linux/err.h>
 #include <linux/clk.h>
+#include <linux/clk/msm8953-cpu-uv.h>
 #include <linux/cpu.h>
+#include <linux/cpufreq.h>
 #include <linux/mutex.h>
 #include <linux/delay.h>
 #include <linux/debugfs.h>
@@ -29,8 +31,10 @@
 #include <linux/of.h>
 #include <linux/of_platform.h>
 #include <linux/clk/msm-clock-generic.h>
+#include <linux/slab.h>
 #include <linux/suspend.h>
 #include <linux/regulator/rpm-smd-regulator.h>
+#include <linux/regulator/cpr3-uv.h>
 #include <linux/clk/msm-clk-provider.h>
 #include <linux/uaccess.h>
 #include <soc/qcom/clock-local2.h>
@@ -132,8 +136,8 @@ static struct pll_clk apcs_hf_pll = {
 		.test_ctl_lo_val = 0x1C000000,
 	},
 	.base = &virt_bases[APCS_C0_PLL_BASE],
-	.max_rate = 2208000000UL,
-	.min_rate = 652800000UL,
+	.max_rate = 2400000000UL,
+	.min_rate = 480000000UL,
 	.src_rate =  19200000UL,
 	.c = {
 		.parent = &xo_a_clk.c,
@@ -603,6 +607,83 @@ static void populate_opp_table(struct platform_device *pdev)
 
 	print_opp_table(a53_pwr_cpu, a53_perf_cpu);
 }
+
+#ifdef CONFIG_MSM8953_CPU_VOLTAGE_CONTROL
+/* Limits for userspace CPU ceiling voltages (PM8953 S5 / APSS boost ceiling) */
+#define CPU_UV_MIN_MV		500
+#define CPU_UV_MAX_MV		1140
+#define CPU_UV_STEP_MV		5
+
+/*
+ * UV_mV_table: one line per CPU frequency, highest first, showing the CPR
+ * ceiling voltage of its corner. Writing the same number of space separated
+ * millivolt values sets the ceilings in that order. All clusters share one
+ * PLL and one CPR regulator, so the power cluster clock describes them all.
+ */
+static ssize_t show_UV_mV_table(struct cpufreq_policy *policy, char *buf)
+{
+	struct clk *c = &a53_pwr_clk.c;
+	struct regulator *reg = c->vdd_class->regulator[0];
+	int i, floor, ceiling, rc;
+	ssize_t len = 0;
+
+	for (i = c->num_fmax - 1; i > 0; i--) {
+		rc = cpr3_regulator_get_corner_limits(reg,
+				c->vdd_class->vdd_uv[i], &floor, &ceiling);
+		if (rc)
+			return rc;
+
+		len += scnprintf(buf + len, PAGE_SIZE - len, "%lumhz: %d mV\n",
+				 c->fmax[i] / 1000000, ceiling / 1000);
+	}
+
+	return len;
+}
+
+static ssize_t store_UV_mV_table(struct cpufreq_policy *policy,
+				 const char *buf, size_t count)
+{
+	struct clk *c = &a53_pwr_clk.c;
+	struct regulator *reg = c->vdd_class->regulator[0];
+	int i, n, mv, rc, levels = c->num_fmax - 1;
+	int *ceiling;
+
+	if (levels <= 0)
+		return -EINVAL;
+
+	ceiling = kcalloc(levels, sizeof(*ceiling), GFP_KERNEL);
+	if (!ceiling)
+		return -ENOMEM;
+
+	/* Parse every value before applying any, so a bad write is a no-op */
+	for (i = 0; i < levels; i++) {
+		if (sscanf(buf, "%d%n", &mv, &n) != 1) {
+			rc = -EINVAL;
+			goto out;
+		}
+		buf += n;
+
+		mv = clamp(mv, CPU_UV_MIN_MV, CPU_UV_MAX_MV);
+		ceiling[i] = roundup(mv, CPU_UV_STEP_MV) * 1000;
+	}
+
+	for (i = 0; i < levels; i++) {
+		rc = cpr3_regulator_set_corner_ceiling(reg,
+				c->vdd_class->vdd_uv[levels - i], ceiling[i]);
+		if (rc)
+			goto out;
+	}
+
+	pr_info("clock-cpu-8953: CPU ceiling voltages changed from userspace\n");
+	rc = count;
+out:
+	kfree(ceiling);
+	return rc;
+}
+
+struct freq_attr msm8953_uv_mv_table =
+	__ATTR(UV_mV_table, 0644, show_UV_mV_table, store_UV_mV_table);
+#endif
 
 static int of_get_fmax_vdd_class(struct platform_device *pdev, struct clk *c,
 								char *prop_name)
