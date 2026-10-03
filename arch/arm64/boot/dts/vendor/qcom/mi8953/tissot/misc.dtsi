@@ -10,3 +10,14 @@
 &spi_peel_ir {
 	status = "okay";
 };
+
+/*
+ * pa-therm0 reads PMIC ADC channel 0x36, which is not bonded to a
+ * thermistor on this board. The input floats near full scale and the
+ * zone reports a bogus ~93C, which shows up as a false overheat in the
+ * UI and skews thermal-engine reporting. The zone is unused, so drop it.
+ * Only case-therm-step follows it, so zone renumbering stays contained.
+ */
+&thermal_zones {
+	/delete-node/ pa-therm0;
+};
