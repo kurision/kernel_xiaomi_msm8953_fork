@@ -16,5 +16,17 @@ config MSM_CLK_CONTROLLER_V2
 	   Generate clock data structures from definitions found in
 	   device tree.
 
+config MSM8953_CPU_VOLTAGE_CONTROL
+	bool "MSM8953 CPU voltage control (UV_mV_table)"
+	depends on ARCH_MSM8953 && CPU_FREQ_MSM && REGULATOR_CPR4_APSS
+	help
+	  Adds /sys/devices/system/cpu/cpuN/cpufreq/UV_mV_table. Reading it
+	  lists the CPR ceiling voltage of every CPU frequency, highest
+	  first; writing the same number of space separated millivolt
+	  values sets those ceilings. Values are clamped to 500-1140 mV and
+	  rounded up to 5 mV, and the CPR floor follows a lowered ceiling.
+
+	  If unsure, say N.
+
 source "drivers/clk/msm/mdss/Kconfig"
 
