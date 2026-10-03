@@ -58,6 +58,32 @@
 		opp-931 { opp-hz = /bits/ 64 < 7104 >;  }; /* 10. 931 MHz */
 	};
 
+	/*
+	 * Core clock OPP table for the 3D engine. kgsl only registers an
+	 * OPP table when this node has "operating-points-v2"
+	 * (adreno_of_parse_pwrlevels), but 4.19's devfreq_add_device()
+	 * requires one to resolve scaling_min/max_freq. Without it
+	 * kgsl_pwrscale_init() bails out, no governor is registered and
+	 * the GPU is stranded on qcom,initial-pwrlevel.
+	 *
+	 * These must stay in sync with qcom,gpu-freq in qcom,gpu-pwrlevels
+	 * below, minus the trailing XO level: kgsl_pwrscale_init() drops
+	 * the last pwrlevel when building the devfreq freq_table, so a
+	 * matching OPP count keeps the cooling device state indices
+	 * aligned with the pwrlevels.
+	 */
+	gpu_opp_table: gpu-opp-table {
+		compatible = "operating-points-v2";
+
+		opp-650 { opp-hz = /bits/ 64 < 650000000 >; }; /*  0. TURBO   */
+		opp-560 { opp-hz = /bits/ 64 < 560000000 >; }; /*  1. NOM+    */
+		opp-510 { opp-hz = /bits/ 64 < 510000000 >; }; /*  2. NOM     */
+		opp-400 { opp-hz = /bits/ 64 < 400000000 >; }; /*  3. SVS+    */
+		opp-320 { opp-hz = /bits/ 64 < 320000000 >; }; /*  4. SVS     */
+		opp-216 { opp-hz = /bits/ 64 < 216000000 >; }; /*  5. Low SVS */
+		opp-133 { opp-hz = /bits/ 64 < 133300000 >; }; /*  6. Min SVS */
+	};
+
 	gpubw: qcom,gpubw {
 		compatible = "qcom,devbw";
 		governor = "bw_vbif";
@@ -127,6 +153,9 @@
 		/* GDSC oxili regulators */
 		vddcx-supply = <&gdsc_oxili_cx>;
 		vdd-supply = <&gdsc_oxili_gx>;
+
+		/* Core clock OPP data, required by devfreq_add_device() */
+		operating-points-v2 = <&gpu_opp_table>;
 
 		/* CPU latency parameter */
 		qcom,pm-qos-active-latency = <213>;
