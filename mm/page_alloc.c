@@ -330,9 +330,21 @@ int user_min_free_kbytes = -1;
  * unsupported and the premature reclaim offsets the advantage of long-term
  * fragmentation avoidance.
  */
-int watermark_boost_factor __read_mostly;
-#else
 int watermark_boost_factor __read_mostly = 15000;
+#else
+
+/*
+ * Disable watermark boosting.
+ *
+ * A failed high-order allocation temporarily raises the watermarks so kswapd
+ * reclaims early, then drops them again once the allocation succeeds. On a
+ * memory-constrained device that produces a burst of reclaim followed by a
+ * quiet period, and the burst lands squarely in the middle of whatever the
+ * foreground was doing. Reclaiming only when a real allocation actually needs
+ * it keeps the work proportional to the need. The sysctl stays available, so
+ * this can be tuned at runtime instead of being hard-wired.
+ */
+int watermark_boost_factor __read_mostly;
 #endif
 int watermark_scale_factor = 20;
 
