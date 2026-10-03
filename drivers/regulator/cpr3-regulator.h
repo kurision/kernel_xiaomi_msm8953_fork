@@ -139,6 +139,9 @@ struct cpr4_sdelta {
  *			that manage LDO300 supply regulator.
  * @sdelta:		The CPR4 controller specific data for this corner. This
  *			field is applicable for CPR4 controllers.
+ * @default_floor_volt:	The floor voltage in microvolts before the first
+ *			userspace ceiling change, or 0 if the ceiling was never
+ *			changed (see cpr3_regulator_set_corner_ceiling())
  *
  * The value of last_volt is initialized inside of the cpr3_regulator_register()
  * call with the open_loop_volt value.  It can later be updated to the settled
@@ -172,6 +175,7 @@ struct cpr3_corner {
 	bool			use_open_loop;
 	bool			ldo_mode_allowed;
 	struct cpr4_sdelta	*sdelta;
+	int			default_floor_volt;
 };
 
 /**
