@@ -975,9 +975,12 @@ out:
 }
 
 /*
- * For blk-mq devices, we default to using mq-deadline, if available, for single
- * queue devices.  If deadline isn't available OR we have multiple queues,
- * default to "none".
+ * For blk-mq devices, we default to the first of kyber, bfq and mq-deadline
+ * that is built in, for single queue devices. If none is available OR we
+ * have multiple queues, default to "none".
+ *
+ * kyber comes first because on msm8953 eMMC it had the lowest worst-case
+ * cold app launch time; bfq had the highest.
  */
 int elevator_init_mq(struct request_queue *q)
 {
@@ -991,7 +994,11 @@ int elevator_init_mq(struct request_queue *q)
 
 	if (unlikely(q->elevator))
 		goto out;
-	if (IS_ENABLED(CONFIG_IOSCHED_BFQ)) {
+	if (IS_ENABLED(CONFIG_MQ_IOSCHED_KYBER)) {
+		e = elevator_get(q, "kyber", false);
+		if (!e)
+			goto out;
+	} else if (IS_ENABLED(CONFIG_IOSCHED_BFQ)) {
 		e = elevator_get(q, "bfq", false);
 		if (!e)
 			goto out;
