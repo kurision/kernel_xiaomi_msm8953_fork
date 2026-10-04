@@ -122,6 +122,19 @@ static inline int pmdp_clear_flush_young(struct vm_area_struct *vma,
 #endif /* CONFIG_TRANSPARENT_HUGEPAGE */
 #endif
 
+#ifndef arch_has_hw_pte_young
+/*
+ * Return whether the accessed bit is supported on the local CPU.
+ *
+ * This stub assumes accessing through an old PTE triggers a page fault.
+ * Architectures that automatically set the access bit should overwrite it.
+ */
+static inline bool arch_has_hw_pte_young(void)
+{
+	return false;
+}
+#endif
+
 #ifndef __HAVE_ARCH_PTEP_GET_AND_CLEAR
 static inline pte_t ptep_get_and_clear(struct mm_struct *mm,
 				       unsigned long address,
@@ -1130,6 +1143,17 @@ static inline bool arch_has_pfn_modify_check(void)
 # define PAGE_KERNEL_EXEC PAGE_KERNEL
 #endif
 
+#ifndef arch_has_hw_nonleaf_pmd_young
+/*
+ * Return whether the accessed bit in non-leaf PMD entries is supported on the
+ * local CPU.
+ */
+static inline bool arch_has_hw_nonleaf_pmd_young(void)
+{
+	return IS_ENABLED(CONFIG_ARCH_HAS_NONLEAF_PMD_YOUNG);
+}
+#endif
+
 #endif /* !__ASSEMBLY__ */
 
 #if !defined(MAX_POSSIBLE_PHYSMEM_BITS) && !defined(CONFIG_64BIT)
@@ -1167,6 +1191,29 @@ static inline bool arch_has_pfn_modify_check(void)
 
 #ifndef mm_pmd_folded
 #define mm_pmd_folded(mm)	__is_defined(__PAGETABLE_PMD_FOLDED)
+#endif
+
+/* Leaf entries must never be treated as page-table pointers by MGLRU. */
+#ifndef pmd_leaf
+#ifdef pmd_sect
+#define pmd_leaf(pmd) pmd_sect(pmd)
+#else
+#define pmd_leaf(pmd) (pmd_trans_huge(pmd) || pmd_devmap(pmd))
+#endif
+#endif
+#ifndef pud_leaf
+#ifdef pud_sect
+#define pud_leaf(pud) pud_sect(pud)
+#else
+#define pud_leaf(pud) (pud_trans_huge(pud) || pud_devmap(pud))
+#endif
+#endif
+#ifndef p4d_leaf
+#define p4d_leaf(p4d) 0
+#endif
+
+#ifndef pud_index
+#define pud_index(addr)		(((addr) >> PUD_SHIFT) & (PTRS_PER_PUD - 1))
 #endif
 
 #endif /* _LINUX_PGTABLE_H */

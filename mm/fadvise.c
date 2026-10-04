@@ -110,6 +110,8 @@ static int generic_fadvise(struct file *file, loff_t offset, loff_t len,
 		force_page_cache_readahead(mapping, file, start_index, nrpages);
 		break;
 	case POSIX_FADV_NOREUSE:
+		/* Recorded so vma_has_recency() can skip these file mappings. */
+		file->f_mode |= FMODE_NOREUSE;
 		break;
 	case POSIX_FADV_DONTNEED:
 		if (!inode_write_congested(mapping->host))

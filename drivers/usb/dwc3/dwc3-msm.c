@@ -4889,6 +4889,12 @@ static int dwc3_msm_pm_suspend(struct device *dev)
 	dbg_event(0xFF, "PM Sus", 0);
 
 	/*
+	 * Make sure pending PM/USB work is completed before changing
+	 * pm_suspended. This prevents races with resume_work().
+	 */
+	flush_workqueue(mdwc->dwc3_wq);
+
+	/*
 	 * Check if pm_suspend can proceed irrespective of runtimePM state of
 	 * host.
 	 */
@@ -4917,6 +4923,12 @@ static int dwc3_msm_pm_resume(struct device *dev)
 
 	dev_dbg(dev, "dwc3-msm PM resume\n");
 	dbg_event(0xFF, "PM Res", 0);
+
+	/*
+	 * Synchronize with pending USB/PM work before changing
+	 * pm_suspended. This avoids races with resume_work().
+	 */
+	flush_workqueue(mdwc->dwc3_wq);
 
 	atomic_set(&mdwc->pm_suspended, 0);
 

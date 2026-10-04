@@ -1,5 +1,82 @@
 # Handoff — Mi A1 (tissot) 4.19 kernel: OC/UC/UV, repartition, flashing
 
+## Latest session — MGLRU test branch (2026-10-04)
+
+This section supersedes the old snapshot below. Full port notes, fixes and verification: [mglru-port-design.md](mglru-port-design.md).
+
+### Pause / resume tomorrow
+
+- The user temporarily booted the new image and then requested a handoff before sleeping. **Initial boot is verified; sustained stability and controlled app tests remain pending.** See [mglru-test-report.md](mglru-test-report.md).
+- Confirmed Mi A1 serial `2819f2320604`, release `4.19.325-cip136-st20-perf-mglru-test-ga8f025fb9452-dirty`, boot completion `1`, MGLRU enabled `0x0001`, `min_ttl_ms=0`, swappiness `100`, watermark scale `200`.
+- No permanent flash was performed in this session. A normal reboot returns to the installed boot image; recheck the running release before testing tomorrow. Do not assume the phone is still on the temporary kernel.
+- Saved capture: `out/mglru-live/20261004-004824/{start-state.txt,kernel.log,android.log}`. It includes boot messages and ends around 00:51:41 phone time / 281 seconds uptime. **Collectors are stopped; no overnight capture is active.** Their original host PIDs no longer exist. The reason they stopped was not established.
+- Captured three lmkd kills: Magisk and LineageOS settingsconfig during boot (low watermark plus low swap), then carrierconfig (low watermark). No captured kernel panic, Oops or kernel OOM kill; existing IRQ/SMEM warnings remain. This short window cannot establish overnight stability.
+- At a later read, zram used 565,828 KiB swap (~552.6 MiB); original data 578,318,336 bytes (~551.5 MiB), physical storage 177,164,288 bytes (~169.0 MiB). No controlled 14-launch comparison was run on MGLRU yet.
+- Tomorrow: pin all adb commands to `2819f2320604` (a Pixel may also be connected), check release/uptime/boot completion, collect dmesg/logcat and available pstore evidence before rebooting if a crash is suspected, then restart capture. Repeat `scripts/test-tissot-memory.sh` with current 100/200 settings and compare retention, kills, PSI, reclaim and launch times with the pre-port runs below. Consider a fresh-boot MGLRU-disabled comparison only if needed.
+- Keep the source on `mglru-test`; changes remain uncommitted. Do not rebuild or flash merely to resume logging. Latest workspace instructions require explaining and confirming each file edit, and prohibit a build unless requested.
+
+### Current progress
+
+- Active branch: **`mglru-test`**, created from `oc-test` at `a8f025fb9452`. Tuning, port and scripts are currently uncommitted.
+- **MGLRU port implemented.** Complete older page-based series adapted to this 4.19 tree, with Qualcomm follow-up fixes, runtime switch and debugfs.
+- **Final `scripts/build-tissot.sh` build and ZIP packaging succeeded (exit 0).** Latest log: `out/mglru-verification/build-script-final.log`.
+- MGLRU-disabled affected-object compile checks and actual-source swap-shadow host checks passed. Build success establishes buildability, not device boot stability or performance.
+- The MGLRU image has now booted temporarily and its running release and enabled state were verified. No permanent flash was performed; controlled testing remains pending.
+
+### Memory findings before the port
+
+- Simple LMK's raw-pressure tuning still killed apps early, including on empty noncritical reclaim reports. Returned to userspace lmkd on `oc-test`, with PSI and `CONFIG_BALANCE_ANON_FILE_RECLAIM=y`.
+- Backported the swappiness 0..200 range from the Android Common Kernel 5.4 change; keep default 100. Global sysctl, memcg validation and documentation updated.
+- Pixel 7 Pro inspection: Sultan 6.1, swappiness 60, watermark scale 200, `lz77eh`, MGLRU configured enabled, Simple LMK active. At inspection its zram was approximately 87% used after almost 24 hours. This is a different workload and kernel, not proof that copying one value reproduces its behavior.
+- Three fresh-boot Mi A1 runs, each the same 14 launches (13 distinct apps):
+
+| Swappiness / watermark scale | lmkd kills during test | Original app PIDs retained | Final zram original data | Median launch time | Full memory stall time / window |
+| --- | --- | --- | --- | --- | --- |
+| 100 / 20 | 10 | 12/13 | 266 MiB | 961 ms | 1.19% |
+| 100 / 200 | 0 | 13/13 | 386 MiB | 978 ms | 1.85% |
+| 60 / 200 | 0 | 13/13 | 226 MiB | 1,027 ms | 1.51% |
+
+Both watermark-200 runs had zero additional direct reclaim during launches. One run per setting and rising battery temperature (35.7 to 37.5 C) limit performance conclusions. The approved kernel defaults are now **100 / 200**; higher zram occupancy is not itself the success criterion.
+
+Logs: `out/memory-tests/20261004-000115-swappiness-100-watermark-20-Qxmbv1/`, `20261004-000454-swappiness-100-watermark-200-edIYNB/`, `20261004-000831-swappiness-60-watermark-200-rbiytJ/`.
+
+### Scripts
+
+- `scripts/build-tissot.sh`: merges tissot fragments, builds `Image.gz-dtb`, then packages the ZIP. Use this for normal builds.
+- `scripts/package-tissot.sh`: packages the latest existing build output; verifies ZIP contents and kernel payload.
+- `scripts/test-tissot-memory.sh [SWAPPINESS [WATERMARK_SCALE_FACTOR]]`: repeats 14 launches, records continuous lmkd logs and memory/process snapshots, restores temporary values on exit.
+- `python3 scripts/test-mglru-shadow.py`: runs actual-source host regressions for shadow cleanup and token encoding.
+
+### Main port fixes
+
+- Adapt existing page-table headers and mmap-lock names.
+- Register exec address spaces before use, outside the IRQ-disabled region; retain task-lock protection.
+- Preserve generation-token bits and single scaling of legacy workingset timestamps.
+- Recognize XArray shadow values without bypassing the swap insertion preload mechanism.
+- Fix shadow-range cleanup to bound the current slot before deletion; regression failed before the fix and passed afterward.
+- Accept generation/reference page flags in FUSE checks, and add compile-time layout constraints.
+- Preserve baseline tuning, remove unrelated donor fork additions, and label test builds `-perf-mglru-test`.
+
+### Built artifacts
+
+- Kernel release: `4.19.325-cip136-st20-perf-mglru-test-ga8f025fb9452-dirty`.
+- Image: `out/arch/arm64/boot/Image.gz-dtb`.
+- Flashable ZIP: `out/tissot-4.19.325-cip136-st20-perf-mglru-test-ga8f025fb9452-dirty.zip`.
+- ZIP SHA256: `1ba12abd8553cfef8d3619384ec1d4a7cc8fee91ec860a01120c469961f5f9cf`.
+- ZIP integrity, exact payload match, gzip image and appended DTB were verified. Temporary device boot was subsequently verified; permanent flashing remains untested.
+
+### Temporary boot image ready
+
+- `out/boot-mglru-test.img`, SHA256 `d5b1aca3fa01bb25eb2c59ffa66e565d2e1a6aa5f40607b896caa9cf75c3475b`.
+- Preserves the captured phone boot image's Magisk ramdisk and boot parameters; only its kernel was replaced. Verified byte-identical old-kernel round trip, new kernel/ramdisk contents and partition-size fit.
+- In bootloader mode: `fastboot -s 2819f2320604 boot out/boot-mglru-test.img`. This does not flash; reboot returns to the installed image.
+
+### Next device checks
+
+Initial temporary boot and enabled-state checks passed. Next repeat the existing app test, inspect reclaim counters and monitor for warnings under load. CPU access-bit support may leave page-table walking unavailable while the generation core still operates; the observed enabled mask is `0x0001`. Compare with the runtime switch set to 0 if needed. Zram remains LZ4; `lz77eh` was not ported. Permanent flashing and sustained hardware stability remain unverified.
+
+## Historical handoff (older snapshot)
+
 State as of 2026-10-03 ~21:20. Full technical write-up: `docs/oc-uc.md`.
 
 ## Current device state (verified over adb)
