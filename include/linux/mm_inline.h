@@ -280,7 +280,7 @@ static inline bool lru_gen_add_page(struct lruvec *lruvec, struct page *page, bo
 
 static inline bool lru_gen_del_page(struct lruvec *lruvec, struct page *page, bool reclaiming)
 {
-	unsigned long flags;
+	unsigned long flags, old_flags, new_flags;
 	int gen = page_lru_gen(page);
 
 	if (gen < 0)
@@ -291,8 +291,12 @@ static inline bool lru_gen_del_page(struct lruvec *lruvec, struct page *page, bo
 
 	/* for migrate_page_states() */
 	flags = !reclaiming && lru_gen_is_active(lruvec, gen) ? BIT(PG_active) : 0;
-	flags = set_mask_bits(&page->flags, LRU_GEN_MASK, flags);
-	gen = ((flags & LRU_GEN_MASK) >> LRU_GEN_PGOFF) - 1;
+	/* 4.19 set_mask_bits() returns new flags; accounting needs the old ones. */
+	old_flags = READ_ONCE(page->flags);
+	do {
+		new_flags = (old_flags & ~LRU_GEN_MASK) | flags;
+	} while (!lru_gen_try_cmpxchg(&page->flags, &old_flags, new_flags));
+	gen = ((old_flags & LRU_GEN_MASK) >> LRU_GEN_PGOFF) - 1;
 
 	lru_gen_update_size(lruvec, page, gen, -1);
 	list_del(&page->lru);
