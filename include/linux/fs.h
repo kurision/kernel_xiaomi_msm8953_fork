@@ -151,6 +151,9 @@ typedef int (dio_iodone_t)(struct kiocb *iocb, loff_t offset,
 #define FMODE_ATOMIC_POS	((__force fmode_t)0x8000)
 /* Write access to underlying fs */
 #define FMODE_WRITER		((__force fmode_t)0x10000)
+
+/* File is not expected to be reused soon */
+#define FMODE_NOREUSE		((__force fmode_t)(1 << 23))
 /* Has read method(s) */
 #define FMODE_CAN_READ          ((__force fmode_t)0x20000)
 /* Has write method(s) */

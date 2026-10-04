@@ -140,3 +140,8 @@ kernel/configs/android-*.cfg
 #
 Android.bp
 out/*
+
+#
+#Local agent workspace instructions
+#
+AGENTS.md
