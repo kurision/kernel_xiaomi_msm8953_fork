@@ -257,11 +257,13 @@ static void unregister_memcg_shrinker(struct shrinker *shrinker)
 #endif /* CONFIG_MEMCG_KMEM */
 
 #ifdef CONFIG_MEMCG
+#ifdef CONFIG_LRU_GEN_ENABLED
 static bool cgroup_reclaim(struct scan_control *sc)
 {
 	return sc->target_mem_cgroup;
 }
 
+#endif /* CONFIG_LRU_GEN_ENABLED */
 static bool global_reclaim(struct scan_control *sc)
 {
 	return !sc->target_mem_cgroup;
@@ -316,10 +318,12 @@ static bool memcg_congested(pg_data_t *pgdat,
 
 }
 #else
+#ifdef CONFIG_LRU_GEN_ENABLED
 static bool cgroup_reclaim(struct scan_control *sc)
 {
 	return false;
 }
+#endif /* CONFIG_LRU_GEN_ENABLED */
 
 static bool global_reclaim(struct scan_control *sc)
 {
@@ -2565,6 +2569,7 @@ out:
 	}
 }
 
+#ifdef CONFIG_LRU_GEN_ENABLED
 #ifdef CONFIG_CMA
 /*
  * It is waste of effort to scan and reclaim CMA pages if it is not available
@@ -2583,6 +2588,7 @@ static bool skip_cma(struct page *page, struct scan_control *sc)
 	return false;
 }
 #endif
+#endif /* CONFIG_LRU_GEN_ENABLED */
 
 #ifdef CONFIG_LRU_GEN
 
