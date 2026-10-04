@@ -868,13 +868,17 @@ tooling to work, you can do:
 
 swappiness
 
-This control is used to define how aggressive the kernel will swap
-memory pages.  Higher values will increase aggressiveness, lower values
-decrease the amount of swap.  A value of 0 instructs the kernel not to
-initiate swap until the amount of free and file-backed pages is less
-than the high water mark in a zone.
+Swappiness accepts values from 0 to 200 and describes the relative cost
+of swapping versus reclaiming file-backed pages. At 100, both have equal
+weight. Lower values favor reclaiming file-backed pages; higher values
+favor swapping anonymous pages. Values above 100 can be useful when swap
+uses compressed RAM, such as zram, and is cheaper than filesystem I/O.
+The best value depends on the workload and should be measured.
 
-The default value is 60.
+A value of 0 delays swapping until the free and file-backed pages fall
+below the high watermark in a zone.
+
+The default value in this tree is 100.
 
 ==============================================================
 
