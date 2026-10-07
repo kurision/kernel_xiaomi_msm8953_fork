@@ -1,11 +1,11 @@
 /*
  * CPU and GPU overclock / underclock for tissot.
  *
- * CPU: 480 MHz - 2400 MHz (stock 652.8 - 2016 MHz on speed bin 2)
+ * CPU: 480 MHz - 2784 MHz (stock 652.8 - 2016 MHz on speed bin 2)
  * GPU: 100 MHz - 725 MHz  (stock 133.3 - 650 MHz)
  *
  * All clusters and the CCI share the C0 HFPLL, so every CPU table below
- * has one entry per CPR corner. Corners 12-15 sit above the fused Turbo
+ * has one entry per CPR corner. Corners 12-19 sit above the fused Turbo
  * corner (2016 MHz); cpr4-apss-regulator extrapolates their open-loop
  * voltage and target quotients along the NOM -> Turbo slope.
  *
@@ -29,7 +29,11 @@
 	< 2150400000 12>,			\
 	< 2208000000 13>,			\
 	< 2304000000 14>,			\
-	< 2400000000 15>
+	< 2400000000 15>,			\
+	< 2496000000 16>,			\
+	< 2592000000 17>,			\
+	< 2688000000 18>,			\
+	< 2784000000 19>
 
 /* CCI runs at HFPLL / 2.5 */
 #define TISSOT_CCI_FMAX			\
@@ -48,7 +52,11 @@
 	<  860160000 12>,			\
 	<  883200000 13>,			\
 	<  921600000 14>,			\
-	<  960000000 15>
+	<  960000000 15>,			\
+	<  998400000 16>,			\
+	< 1036800000 17>,			\
+	< 1075200000 18>,			\
+	< 1113600000 19>
 
 &clock_cpu {
 	qcom,speed0-bin-v0-cl = TISSOT_CL_FMAX;
@@ -77,27 +85,32 @@
 		 < 2150400 >,
 		 < 2208000 >,
 		 < 2304000 >,
-		 < 2400000 >;
+		 < 2400000 >,
+		 < 2496000 >,
+		 < 2592000 >,
+		 < 2688000 >,
+		 < 2784000 >;
 };
 
 /*
- * CPR: every populated speed bin (0, 2, 6, 7) gets the same 15 corners,
+ * CPR: every populated speed bin (0, 2, 6, 7) gets the same 19 corners,
  * so all per-corner properties below use the single-tuple form that
  * applies to every fuse combo.
  */
 &apc_vreg {
-	regulator-max-microvolt = <15>;
+	/* Corner selectors, not millivolts: selector N == corner N - 1 */
+	regulator-max-microvolt = <19>;
 
-	qcom,cpr-speed-bin-corners = <15 0 15 0 0 0 15 15>;
+	qcom,cpr-speed-bin-corners = <19 0 19 0 0 0 19 19>;
 	qcom,cpr-corners =
 		/* Speed bin 0 */
-		<15 15 15 15 15 15 15 15>,
+		<19 19 19 19 19 19 19 19>,
 
 		/* Speed bin 1 */
 		<0 0 0 0 0 0 0 0>,
 
 		/* Speed bin 2 */
-		<15 15 15 15 15 15 15 15>,
+		<19 19 19 19 19 19 19 19>,
 
 		/* Speed bin 3..5 */
 		<0 0 0 0 0 0 0 0>,
@@ -105,10 +118,10 @@
 		<0 0 0 0 0 0 0 0>,
 
 		/* Speed bin 6 */
-		<15 15 15 15 15 15 15 15>,
+		<19 19 19 19 19 19 19 19>,
 
 		/* Speed bin 7 */
-		<15 15 15 15 15 15 15 15>;
+		<19 19 19 19 19 19 19 19>;
 
 	/* LowSVS 652.8, SVS 1036.8, NOM 1689.6, Turbo 2016 MHz */
 	qcom,cpr-corner-fmax-map = <3 5 8 11>;
@@ -116,22 +129,26 @@
 	qcom,corner-frequencies =
 		< 480000000  576000000  652800000  806400000 1036800000
 		 1248000000 1401600000 1689600000 1804800000 1958400000
-		 2016000000 2150400000 2208000000 2304000000 2400000000>;
+		 2016000000 2150400000 2208000000 2304000000 2400000000
+		 2496000000 2592000000 2688000000 2784000000>;
 
 	qcom,cpr-voltage-ceiling =
 		< 715000  715000  715000  790000  790000
 		  790000  860000  865000  920000  990000
-		 1065000 1065000 1090000 1115000 1140000>;
+		 1065000 1065000 1090000 1115000 1140000 1140000 1140000
+		 1140000 1140000>;
 
 	qcom,cpr-voltage-floor =
 		< 500000  500000  500000  500000  500000
 		  500000  500000  500000  500000  500000
-		  500000  500000  500000  500000  500000>;
+		  500000  500000  500000  500000  500000
+		  500000  500000  500000  500000>;
 
 	qcom,cpr-floor-to-ceiling-max-range =
 		<  50000   50000   50000   50000   50000
 		   50000   50000   50000   50000   50000
-		   50000   50000   50000   50000   50000>;
+		   50000   50000   50000   50000   50000
+		   50000   50000   50000   50000>;
 
 	/*
 	 * Misc fuse 0..1. Stock adds 30 mV at 1401.6 MHz for misc fuse 1;
@@ -141,13 +158,15 @@
 	qcom,cpr-misc-fuse-voltage-adjustment =
 		<      0       0       0       0       0
 		       0       0       0       0       0
-		       0   15000   20000   25000   30000>,
+		       0   15000   20000   25000   30000   30000   30000
+		                                                     30000   30000>,
 		<      0       0       0       0       0
 		       0   30000       0       0       0
-		       0   15000   20000   25000   30000>;
+		       0   15000   20000   25000   30000   30000   30000
+		                                                     30000   30000>;
 
 	qcom,mem-acc-voltage =
-		<1 1 1 1 1 1 2 2 2 2 2 2 2 2 2>;
+		<1 1 1 1 1 1 2 2 2 2 2 2 2 2 2 2 2 2 2>;
 
 	/* 1958.4 MHz, as with the stock corner 6 */
 	qcom,cpr-aging-ref-corner = <10>;
@@ -322,8 +341,24 @@
 };
 
 /*
+ * The 95 C trip on deca-cpu-max-step is what caps the policy at ~2.2 GHz
+ * under an all-core load. Drop it so the DVFS wall arrives earlier and the
+ * SoC runs cooler; the 105 C *-step zones only drive core isolation and
+ * stay as they are.
+ */
+&thermal_zones {
+	deca-cpu-max-step {
+		trips {
+			cpu-trip {
+				temperature = <88000>;
+			};
+		};
+	};
+};
+
+/*
  * Energy model: add the underclock steps. The legacy EM rescales every row
- * by policy max / last row (2400 MHz), so the last row must stay 2400000.
+ * by policy max / last row (2784 MHz), so the last row must stay 2784000.
  * 480 - 806.4 MHz share the LowSVS/SVS voltage, so power follows frequency.
  */
 &CPU_COST_0 {
@@ -346,6 +381,10 @@
 		2208000  44
 		2304000  54
 		2400000  65
+		2496000  68
+		2592000  70
+		2688000  73
+		2784000  76
 	>;
 };
 
@@ -369,6 +408,10 @@
 		2208000  160
 		2304000  170
 		2400000  180
+		2496000  187
+		2592000  194
+		2688000  201
+		2784000  208
 	>;
 };
 
@@ -392,5 +435,9 @@
 		2208000  155
 		2304000  165
 		2400000  175
+		2496000  182
+		2592000  189
+		2688000  196
+		2784000  203
 	>;
 };
