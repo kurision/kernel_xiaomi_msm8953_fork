@@ -68,93 +68,91 @@
 #define LZ4_HASHTABLESIZE (1 << LZ4_MEMORY_USAGE)
 #define LZ4_HASH_SIZE_U32 (1 << LZ4_HASHLOG)
 
-#define LZ4HC_MIN_CLEVEL			3
-#define LZ4HC_DEFAULT_CLEVEL			9
-#define LZ4HC_MAX_CLEVEL			16
+#define LZ4_VERSION_MAJOR 1
+#define LZ4_VERSION_MINOR 9
+#define LZ4_VERSION_RELEASE 4
+#define LZ4_VERSION_NUMBER 10904
+#define LZ4_DISTANCE_MAX 65535
+#define LZ4_DECOMPRESS_INPLACE_MARGIN(compressedSize) (((compressedSize) >> 8) + 32)
+#define LZ4_DECOMPRESS_INPLACE_BUFFER_SIZE(decompressedSize) \
+	((decompressedSize) + LZ4_DECOMPRESS_INPLACE_MARGIN(decompressedSize))
+#define LZ4_COMPRESS_INPLACE_MARGIN (LZ4_DISTANCE_MAX + 32)
+#define LZ4_COMPRESS_INPLACE_BUFFER_SIZE(maxCompressedSize) \
+	((maxCompressedSize) + LZ4_COMPRESS_INPLACE_MARGIN)
 
+#define LZ4HC_MIN_CLEVEL 3
+#define LZ4HC_DEFAULT_CLEVEL 9
+#define LZ4HC_MAX_CLEVEL 12
 #define LZ4HC_DICTIONARY_LOGSIZE 16
-#define LZ4HC_MAXD (1<<LZ4HC_DICTIONARY_LOGSIZE)
+#define LZ4HC_MAXD (1 << LZ4HC_DICTIONARY_LOGSIZE)
 #define LZ4HC_MAXD_MASK (LZ4HC_MAXD - 1)
-#define LZ4HC_HASH_LOG (LZ4HC_DICTIONARY_LOGSIZE - 1)
+#define LZ4HC_HASH_LOG 15
 #define LZ4HC_HASHTABLESIZE (1 << LZ4HC_HASH_LOG)
 #define LZ4HC_HASH_MASK (LZ4HC_HASHTABLESIZE - 1)
 
-/*-************************************************************************
- *	STREAMING CONSTANTS AND STRUCTURES
- **************************************************************************/
-#define LZ4_STREAMSIZE_U64 ((1 << (LZ4_MEMORY_USAGE - 3)) + 4)
-#define LZ4_STREAMSIZE	(LZ4_STREAMSIZE_U64 * sizeof(unsigned long long))
+typedef s8 LZ4_i8;
+typedef u8 LZ4_byte;
+typedef u16 LZ4_u16;
+typedef u32 LZ4_u32;
 
-#define LZ4_STREAMHCSIZE        262192
-#define LZ4_STREAMHCSIZE_SIZET (262192 / sizeof(size_t))
-
-#define LZ4_STREAMDECODESIZE_U64	4
-#define LZ4_STREAMDECODESIZE		 (LZ4_STREAMDECODESIZE_U64 * \
-	sizeof(unsigned long long))
-
-/*
- * LZ4_stream_t - information structure to track an LZ4 stream.
- */
-typedef struct {
-	uint32_t hashTable[LZ4_HASH_SIZE_U32];
-	uint32_t currentOffset;
-	uint32_t initCheck;
-	const uint8_t *dictionary;
-	uint8_t *bufferStart;
-	uint32_t dictSize;
-} LZ4_stream_t_internal;
+typedef struct LZ4_stream_t_internal LZ4_stream_t_internal;
+struct LZ4_stream_t_internal {
+	LZ4_u32 hashTable[LZ4_HASH_SIZE_U32];
+	const LZ4_byte *dictionary;
+	const LZ4_stream_t_internal *dictCtx;
+	LZ4_u32 currentOffset;
+	LZ4_u32 tableType;
+	LZ4_u32 dictSize;
+};
+#define LZ4_STREAM_MINSIZE ((1UL << LZ4_MEMORY_USAGE) + 32)
 typedef union {
-	unsigned long long table[LZ4_STREAMSIZE_U64];
+	char minStateSize[LZ4_STREAM_MINSIZE];
 	LZ4_stream_t_internal internal_donotuse;
 } LZ4_stream_t;
 
-/*
- * LZ4_streamHC_t - information structure to track an LZ4HC stream.
- */
 typedef struct {
-	unsigned int	 hashTable[LZ4HC_HASHTABLESIZE];
-	unsigned short	 chainTable[LZ4HC_MAXD];
-	/* next block to continue on current prefix */
-	const unsigned char *end;
-	/* All index relative to this position */
-	const unsigned char *base;
-	/* alternate base for extDict */
-	const unsigned char *dictBase;
-	/* below that point, need extDict */
-	unsigned int	 dictLimit;
-	/* below that point, no more dict */
-	unsigned int	 lowLimit;
-	/* index from which to continue dict update */
-	unsigned int	 nextToUpdate;
-	unsigned int	 compressionLevel;
-} LZ4HC_CCtx_internal;
+	int price;
+	int off;
+	int mlen;
+	int litlen;
+} LZ4HC_optimal_t;
+
+typedef struct LZ4HC_CCtx_internal LZ4HC_CCtx_internal;
+struct LZ4HC_CCtx_internal {
+	LZ4_u32 hashTable[LZ4HC_HASHTABLESIZE];
+	LZ4_u16 chainTable[LZ4HC_MAXD];
+	const LZ4_byte *end;
+	const LZ4_byte *prefixStart;
+	const LZ4_byte *dictStart;
+	LZ4_u32 dictLimit;
+	LZ4_u32 lowLimit;
+	LZ4_u32 nextToUpdate;
+	short compressionLevel;
+	LZ4_i8 favorDecSpeed;
+	LZ4_i8 dirty;
+	const LZ4HC_CCtx_internal *dictCtx;
+	/* Caller-owned optimal-parser scratch; not part of dictionary state. */
+	LZ4HC_optimal_t optimal[4096 + 3];
+};
 typedef union {
-	size_t table[LZ4_STREAMHCSIZE_SIZET];
+	char minStateSize[sizeof(LZ4HC_CCtx_internal)];
 	LZ4HC_CCtx_internal internal_donotuse;
 } LZ4_streamHC_t;
 
-/*
- * LZ4_streamDecode_t - information structure to track an
- *	LZ4 stream during decompression.
- *
- * init this structure using LZ4_setStreamDecode (or memset()) before first use
- */
 typedef struct {
-	const uint8_t *externalDict;
+	const LZ4_byte *externalDict;
+	const LZ4_byte *prefixEnd;
 	size_t extDictSize;
-	const uint8_t *prefixEnd;
 	size_t prefixSize;
 } LZ4_streamDecode_t_internal;
+#define LZ4_STREAMDECODE_MINSIZE 32
 typedef union {
-	unsigned long long table[LZ4_STREAMDECODESIZE_U64];
+	char minStateSize[LZ4_STREAMDECODE_MINSIZE];
 	LZ4_streamDecode_t_internal internal_donotuse;
 } LZ4_streamDecode_t;
 
-/*-************************************************************************
- *	SIZE OF STATE
- **************************************************************************/
-#define LZ4_MEM_COMPRESS	LZ4_STREAMSIZE
-#define LZ4HC_MEM_COMPRESS	LZ4_STREAMHCSIZE
+#define LZ4_MEM_COMPRESS sizeof(LZ4_stream_t)
+#define LZ4HC_MEM_COMPRESS sizeof(LZ4_streamHC_t)
 
 /*-************************************************************************
  *	Compression Functions
@@ -333,7 +331,7 @@ int LZ4_decompress_safe_partial(const char *source, char *dest,
  *	which must be already allocated
  * @compressionLevel: Recommended values are between 4 and 9, although any
  *	value between 1 and LZ4HC_MAX_CLEVEL will work.
- *	Values >LZ4HC_MAX_CLEVEL behave the same as 16.
+ *	Values >LZ4HC_MAX_CLEVEL behave the same as 12.
  * @wrkmem: address of the working memory.
  *	This requires 'wrkmem' of size LZ4HC_MEM_COMPRESS.
  *
@@ -351,7 +349,7 @@ int LZ4_compress_HC(const char *src, char *dst, int srcSize, int dstCapacity,
  * @streamHCPtr: pointer to the 'LZ4_streamHC_t' structure
  * @compressionLevel: Recommended values are between 4 and 9, although any
  *	value between 1 and LZ4HC_MAX_CLEVEL will work.
- *	Values >LZ4HC_MAX_CLEVEL behave the same as 16.
+ *	Values >LZ4HC_MAX_CLEVEL behave the same as 12.
  *
  * An LZ4_streamHC_t structure can be allocated once
  * and re-used multiple times.
