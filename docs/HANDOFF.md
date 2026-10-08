@@ -139,7 +139,7 @@ State as of 2026-10-03 ~21:20. Full technical write-up: `docs/oc-uc.md`.
 | File | Change |
 | --- | --- |
 | `drivers/regulator/cpr4-apss-regulator.c` | Fmax corner from `fuse_corner_map`; extrapolate voltage + quotients above Turbo |
-| `drivers/regulator/cpr3-regulator.{c,h}`, `include/linux/regulator/cpr3-uv.h` | `cpr3_regulator_get_corner_limits()` / `set_corner_ceiling()`, `default_floor_volt` |
+| `drivers/regulator/cpr3-regulator.{c,h}`, `include/linux/regulator/cpr3-uv.h` | `cpr3_regulator_get_corner_limits()` / `set_corner_ceiling()` (shifts CPR window + target quotients), `uv_adjust_volt` |
 | `drivers/clk/msm/clock-cpu-8953.c` | HFPLL 480–2400 MHz; `UV_mV_table` attr (`include/linux/clk/msm8953-cpu-uv.h`) |
 | `drivers/clk/msm/clock-gcc-8953.c` | 725 MHz GPU row |
 | `drivers/cpufreq/qcom-cpufreq.c` | registers `UV_mV_table` |

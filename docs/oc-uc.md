@@ -334,12 +334,13 @@ removing one `#include` line.
 - `drivers/regulator/cpr3-regulator.c` gets two exported helpers, declared in
   `include/linux/regulator/cpr3-uv.h`:
   - `cpr3_regulator_get_corner_limits()` reads a corner's floor and ceiling.
-  - `cpr3_regulator_set_corner_ceiling()` changes a corner's ceiling.
+  - `cpr3_regulator_set_corner_ceiling()` moves a corner's ceiling and shifts
+    its whole CPR window and target quotients with it.
 - `drivers/clk/msm/clock-cpu-8953.c` implements the attribute
   (`show_UV_mV_table()` / `store_UV_mV_table()`). It exports
   `msm8953_uv_mv_table`, declared in `include/linux/clk/msm8953-cpu-uv.h`.
 - `drivers/cpufreq/qcom-cpufreq.c` adds the attribute to `msm_freq_attr[]`.
-- `struct cpr3_corner` gains `default_floor_volt`.
+- `struct cpr3_corner` gains `uv_adjust_volt`.
 
 **Usage:**
 
@@ -358,26 +359,38 @@ echo "1120 1100 1080 1055 1050 980 920 865 860 790 790 790 715 715 715" \
 
 **What a write does, per step:**
 
-1. The value is clamped to 500–1140 mV and rounded **up** to 5 mV.
-2. The corner's CPR **ceiling** is set to it. Closed loop can never go above
-   the ceiling, so lowering it undervolts that step.
-3. The **floor** becomes `min(original floor, new ceiling)`. It drops only
-   when it has to, and returns to its original value when the ceiling is
-   raised again. If the ceiling goes below the original floor, the step runs
-   at exactly the ceiling (a fixed voltage, with no closed-loop range left).
-4. The open-loop and last-known voltages are clamped into the new range, and
-   `cpr3_regulator_update_ctrl_state()` reprograms the CPR hardware right
+1. The value is clamped to 500–1140 mV, rounded **up** to 5 mV, and capped
+   at the corner's DT ceiling (`abs_ceiling_volt`).
+2. The difference from the current ceiling is the step's adjustment. It's
+   applied like a CPR aging margin (`cpr3_regulator_readjust_volt_and_quot()`
+   is the model):
+   - ceiling, floor and open-loop voltage all move by it, so the closed-loop
+     range (ceiling − 50 mV floor) is kept;
+   - each active RO's target quotient moves by
+     `cpr3_quot_adjustment(ro_scale, adjustment)`, so CPR aims lower (or
+     higher) by the same amount and keeps adapting to temperature, load and
+     droop;
+   - `last_volt` moves too and is kept inside the new range;
+   - the unaged voltages move, so a later aging adjustment keeps it.
+3. `cpr3_regulator_update_ctrl_state()` reprograms the CPR hardware right
    away.
+
+Before this, lowering a ceiling only pulled the floor down to
+`min(original floor, new ceiling)` and left the quotients alone. Any
+undervolt of 50 mV or more made floor = ceiling on every step, so closed loop
+had no range and every step ran at a fixed voltage (seen on the device with
+−75 mV: `floor_volt == ceiling_volt` on all 19 corners).
 
 **Why this way:**
 
 - **Format:** it's the classic faux123 format (`NNNmhz: NNN mV`, a write is
   the same number of values in the same order). Kernel Adiutor, SmartPack and
   EX Kernel Manager already read and write it.
-- **One value per step (the ceiling):** the ceiling is the only knob that
-  actually lowers voltage under CPR closed loop. Lucifer exposed ceiling,
-  floor *and* `last_volt` per cluster. The two clusters share one corner here,
-  so that duplicated every line, and `last_volt` is owned by closed loop.
+- **One value per step (the ceiling):** it's what kernel managers write, and
+  it's the top of the CPR window, so moving it moves the window. Lucifer
+  exposed ceiling, floor *and* `last_volt` per cluster. The two clusters share
+  one corner here, so that duplicated every line, and `last_volt` is owned by
+  closed loop.
 - **All-or-nothing writes:** every value is parsed before any is applied, so
   a truncated or garbage write changes nothing (`-EINVAL`).
 - **Clamp at 1140 mV:** that's the PM8953 S5 maximum and
@@ -394,8 +407,9 @@ echo "1120 1100 1080 1055 1050 980 920 865 860 790 790 790 715 715 715" \
 - Settings don't survive a reboot. Re-apply them from an init script or with
   a kernel manager's "apply on boot".
 - CPR aging adjustment runs once early in boot and recomputes limits from
-  the unaged values. A write made before that finishes can be overwritten, so
-  apply settings after boot completes.
+  the unaged values. Those move with every write, so a write made before
+  aging finishes is kept.
+- A step can't go above its DT ceiling (`qcom,cpr-voltage-ceiling`).
 - A ceiling that's too low crashes or freezes the device at that step. Lower
   in 10–15 mV steps, stress-test each one (§6), and keep a known-good set.
 
@@ -406,7 +420,7 @@ echo "1120 1100 1080 1055 1050 980 920 865 860 790 790 790 715 715 715" \
 - A GPU equivalent (GFX LDO corners 1–3 and the CX level for higher corners)
   is a separate piece of work.
 - A floor file (`UV_floor_mV_table`) could be added if anyone needs to set
-  the closed-loop range directly.
+  the closed-loop range width directly.
 
 ### 4.6 Energy model — underclock rows
 
@@ -767,7 +781,7 @@ ranges, misc adjustment, mem-acc, corner counts) if it is already capped at
 | `drivers/clk/msm/clock-gcc-8953.c` | 725 MHz GPU clock row |
 | `arch/arm64/boot/dts/vendor/qcom/mi8953/tissot/oc.dtsi` | New: all tissot OC/UC tables and energy-model rows |
 | `arch/arm64/boot/dts/vendor/qcom/mi8953/tissot/tissot.dtsi` | `#include "oc.dtsi"` |
-| `drivers/regulator/cpr3-regulator.c`, `cpr3-regulator.h` | `cpr3_regulator_{get_corner_limits,set_corner_ceiling}()`, `default_floor_volt` |
+| `drivers/regulator/cpr3-regulator.c`, `cpr3-regulator.h` | `cpr3_regulator_{get_corner_limits,set_corner_ceiling}()`, `uv_adjust_volt` |
 | `include/linux/regulator/cpr3-uv.h` | New: declarations of the CPR3 helpers |
 | `drivers/clk/msm/clock-cpu-8953.c` | `UV_mV_table` show/store (`msm8953_uv_mv_table`) |
 | `include/linux/clk/msm8953-cpu-uv.h` | New: declaration of `msm8953_uv_mv_table` |
