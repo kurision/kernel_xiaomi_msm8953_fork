@@ -22,6 +22,8 @@ code = r'''
 #include <string.h>
 #define BIT(n) (1UL << (n))
 #define MAX_NR_GENS 4
+#define MIN_NR_GENS 2
+#define ANON_AND_FILE 2
 #define LRU_GEN_PGOFF 8
 #define LRU_GEN_MASK (7UL << LRU_GEN_PGOFF)
 #define PG_active 0
@@ -30,6 +32,7 @@ code = r'''
 #define READ_ONCE(x) (*(volatile __typeof__(x) *)&(x))
 #define WRITE_ONCE(x, value) (*(volatile __typeof__(x) *)&(x) = (value))
 static int warnings;
+#define max(a, b) ((a) > (b) ? (a) : (b))
 #define VM_WARN_ON_ONCE(x) do { if (x) warnings++; } while (0)
 #define VM_WARN_ON_ONCE_PAGE(x, page) VM_WARN_ON_ONCE(x)
 enum lru_list { LRU_INACTIVE_ANON, LRU_ACTIVE_ANON,
@@ -37,13 +40,42 @@ enum lru_list { LRU_INACTIVE_ANON, LRU_ACTIVE_ANON,
 #define LRU_ACTIVE 1
 struct list_head { bool linked; };
 struct page { unsigned long flags; int type, zone, count; struct list_head lru; };
-struct lru_gen_page { unsigned long max_seq; long nr_pages[4][2][2]; };
-struct lruvec { struct lru_gen_page lrugen; long node[4], zone[2][4]; };
+struct lru_gen_folio {
+    unsigned long max_seq;
+    unsigned long min_seq[2];
+    struct list_head folios[4][2][2];
+    long nr_pages[4][2][2];
+    bool enabled;
+};
+struct lruvec { struct lru_gen_folio lrugen; long node[4], zone[2][4]; };
 #define PageActive(p) (!!((p)->flags & BIT(PG_active)))
 #define PageUnevictable(p) (!!((p)->flags & BIT(PG_unevictable)))
-#define page_is_file_cache(p) ((p)->type)
+#define PageDirty(p) 0
+#define PageWriteback(p) 0
+#define PageReclaim(p) 0
+#define PageSwapCache(p) 0
+#define PageWorkingset(p) 0
+#define folio_test_workingset(p) PageWorkingset(p)
+#define folio_test_swapcache(p) PageSwapCache(p)
+#define folio_test_reclaim(p) PageReclaim(p)
+#define folio_test_dirty(p) PageDirty(p)
+#define folio_test_writeback(p) PageWriteback(p)
+#define folio_test_active(p) PageActive(p)
+
+#define folio_is_file_lru(p) ((p)->type)
 #define page_zonenum(p) ((p)->zone)
-#define hpage_nr_pages(p) ((p)->count)
+#define folio_zonenum(p) ((p)->zone)
+#define folio_nr_pages(p) ((p)->count)
+static void list_add(struct list_head *list, struct list_head *head)
+{
+    assert(!list->linked && !head->linked);
+    list->linked = true;
+    head->linked = false;
+}
+static void list_add_tail(struct list_head *list, struct list_head *head)
+{
+    list_add(list, head);
+}
 static void list_del(struct list_head *list)
 {
     assert(list->linked);
@@ -59,6 +91,9 @@ static int exchanges;
 static struct page *racing_page;
 static struct lruvec *racing_lruvec;
 static void promote_during_exchange(void);
+#define PageCompound(p) 0
+#define folio_test_unevictable(p) PageUnevictable(p)
+#define list_entry(head, type, member) ((type *)0)
 static unsigned long cmpxchg(unsigned long *ptr, unsigned long old, unsigned long new)
 {
     unsigned long observed;
@@ -76,14 +111,15 @@ static unsigned long cmpxchg(unsigned long *ptr, unsigned long old, unsigned lon
 # Preserve this tree's actual set_mask_bits return contract in the regression.
 start = bitops.index('#define set_mask_bits(')
 code += '\n' + bitops[start:bitops.index('\n#endif', start)] + '\n'
-for name in ('lru_gen_try_cmpxchg', 'lru_gen_from_seq', 'page_lru_gen',
-             'lru_gen_is_active', 'lru_gen_update_size', 'lru_gen_del_page'):
+for name in ('lru_gen_try_cmpxchg', 'lru_gen_from_seq', 'folio_lru_gen',
+             'lru_gen_is_active', 'lru_gen_update_size',
+             'lru_gen_folio_seq', 'lru_gen_add_folio', 'lru_gen_del_folio'):
     code += '\n' + function(name) + '\n'
 code += r'''
 static void promote_during_exchange(void)
 {
     /* Model a completed aging promotion before the first exchange succeeds. */
-    int old_gen = page_lru_gen(racing_page);
+    int old_gen = folio_lru_gen(racing_page);
     racing_page->flags = (racing_page->flags & ~LRU_GEN_MASK) |
                         (3UL << LRU_GEN_PGOFF) | BIT(PG_referenced);
     lru_gen_update_size(racing_lruvec, racing_page, old_gen, 2);
@@ -117,15 +153,15 @@ int main(void)
             page.flags = ((gen + 1UL) << LRU_GEN_PGOFF) | BIT(PG_referenced);
             page.lru.linked = true;
             lru_gen_update_size(&lv, &page, -1, gen);
-            assert(lru_gen_del_page(&lv, &page, reclaim));
+            assert(lru_gen_del_folio(&lv, &page, reclaim));
             assert_empty(&lv);
-            assert(!page.lru.linked && page_lru_gen(&page) == -1);
+            assert(!page.lru.linked && folio_lru_gen(&page) == -1);
             assert(page.flags == (BIT(PG_referenced) |
                    (!reclaim && active ? BIT(PG_active) : 0)));
         }
         /* A second removal must leave flags and accounting untouched. */
         unsigned long flags = page.flags;
-        assert(!lru_gen_del_page(&lv, &page, reclaim));
+        assert(!lru_gen_del_folio(&lv, &page, reclaim));
         assert(page.flags == flags);
         assert_empty(&lv);
         cases++;
@@ -140,7 +176,7 @@ int main(void)
         racing_lruvec = &lv;
         inject_retry = true;
         exchanges = 0;
-        assert(lru_gen_del_page(&lv, &page, true));
+        assert(lru_gen_del_folio(&lv, &page, true));
         assert(exchanges == 2 && !inject_retry);
         assert_empty(&lv);
         assert(!page.lru.linked && page.flags == BIT(PG_referenced));
