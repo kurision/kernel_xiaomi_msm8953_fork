@@ -20,20 +20,41 @@ DRM entirely (`drivers/Kconfig` has no DRM), GPU is KGSL
 (`drivers/gpu/msm/`) + `FB_MSM_MDSS`. Future GPU sourcing = CAF KGSL tags,
 not the 6.12 donor. Vulkan version comes from Mesa/Turnip userspace.
 
-In flight at session end (scratch only, tree untouched): ThinLTO trial
-LINKS CLEAN (17.5 MB); CFI trial was still building in `/tmp/lto-try`
-(killed with session — rerun below). Next session: commit LTO flip only
-after deciding boot-test order; hold CFI until a device-validated boot.
+ThinLTO and CFI-Clang trials both LINK CLEAN in scratch dirs (tree untouched):
+LTO image 17.5 MB (~2 min at `-j12`), CFI-on-LTO image similar, zero errors.
+Commit order: LTO flip first, boot-test on device, then CFI (a CFI violation
+panics — never stack both untested). `CFI_PERMISSIVE` stays off.
 
-Build policy: `-j12`/`-j16` max, never full `-j$(nproc)` (PC lags).
-Toolchain: system clang-22 + `LLVM=1 LLVM_IAS=1` (no NDK on this host);
-SCS needs `LLVM=1` or the probe silently drops it.
+### Reproducing the LTO/CFI builds on another machine
 
-Next-session commands (from repo root):
-`make O=out ARCH=arm64 LLVM=1 vendor/msm8953-perf_defconfig vendor/mi8953.config vendor/tissot.config`
-`make O=out ARCH=arm64 LLVM=1 LLVM_IAS=1 -j12 Image.gz-dtb`
-CFI re-trial: same with `-e CFI_CLANG` on a scratch copy of `out/.config`.
-`OUT_DIR=out scripts/package-tissot.sh` for the flashable zip.
+Toolchain: any clang ≥ 18 with `ld.lld` + `llvm-ar` on `PATH`
+(this host: Fedora 44 system clang 22.1.8; no Android NDK installed —
+`scripts/build-tissot.sh` defaults `LLVM_BIN` to an NDK path, so either
+install the NDK or export `PATH=/usr/bin:$PATH` and build manually).
+Build flags always: `ARCH=arm64 LLVM=1 LLVM_IAS=1`.
+Gotcha: generating the config WITHOUT `LLVM=1` (plain gcc Kconfig run)
+silently drops `SHADOW_CALL_STACK` (the `-ffixed-x18` probe fails) —
+always merge/defconfig with the clang environment active.
+
+From a clean tree at this branch:
+
+1. `make O=out ARCH=arm64 LLVM=1 vendor/msm8953-perf_defconfig vendor/mi8953.config vendor/tissot.config`
+2. LTO: `./scripts/config --file out/.config -e LTO_CLANG && make O=out ARCH=arm64 LLVM=1 LLVM_IAS=1 olddefconfig`
+   Confirm: `CONFIG_LTO_CLANG=y`, `CONFIG_THINLTO=y` (default under LTO),
+   `CONFIG_LTO_NONE` unset. Gates, all already satisfied: no KASAN,
+   `HAVE_C_RECORDMCOUNT=y`, `LD_IS_LLD=y`, arm64 selects both LTO supports.
+3. `make O=out ARCH=arm64 LLVM=1 LLVM_IAS=1 -j12 Image.gz-dtb`
+   (cap `-j12`/`-j16` — full-thread builds lag the machine).
+4. CFI (only after an LTO boot-test passes):
+   `./scripts/config --file out/.config -e CFI_CLANG`, `olddefconfig`,
+   confirm `CONFIG_CFI_CLANG=y`, rebuild as in step 3.
+5. `OUT_DIR=out scripts/package-tissot.sh` for the flashable zip.
+
+Committing the flips (when validated): append `CONFIG_LTO_CLANG=y`
+(Kconfig choice — replaces `LTO_NONE`) and later `CONFIG_CFI_CLANG=y`
+to `arch/arm64/configs/vendor/tissot.config`, one commit each.
+On-device expectations: SCS/LTO silent; any CFI trip is a panic with
+a `CFI failure` report naming the callsite — capture via `pstore`/UART.
 
 ## Device verification — 2026-10-08
 
