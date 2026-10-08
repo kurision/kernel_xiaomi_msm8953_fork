@@ -458,7 +458,6 @@ int __hddDevSuspendNoIrqHdlr(struct device *dev)
    int ret = 0;
    hdd_context_t* pHddCtx = NULL;
    pVosContextType pVosContext;
-   pVosSchedContext pSchedContext;
 
    ENTER();
 
@@ -485,15 +484,12 @@ int __hddDevSuspendNoIrqHdlr(struct device *dev)
       return -EPERM;
    }
 
-   pSchedContext = &pVosContext->vosSched;
-
-   if (test_bit(RX_POST_EVENT, &pSchedContext->rxEventFlag))
-   {
-      VOS_TRACE(VOS_MODULE_ID_HDD,VOS_TRACE_LEVEL_INFO,
-                "%s: WLAN suspend is not honored",__func__);
-      return -EPERM;
-   }
-
+   /* No RX_POST_EVENT check here on purpose: ->suspend has already stopped
+    * the RX thread and it is frozen before ->suspend_noirq runs, so a
+    * message posted in that window sets the bit with nobody left to clear it
+    * until resume. Failing on it aborted every retry identically, which is
+    * the ~0.3 s suspend loop. The pending message is serviced on resume.
+    */
    VOS_TRACE(VOS_MODULE_ID_HDD, VOS_TRACE_LEVEL_INFO,
              "%s: Suspend No IRQ done successfully",__func__);
    EXIT();
