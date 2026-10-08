@@ -149,3 +149,62 @@ imported function or a verified ancestry path to the pinned snapshot.
 Remaining individual source authors and hashes must be recorded for the
 complete import. The host harness and this tracking document are local
 additions. No commits have been made for this upgrade.
+
+## Deferred backports
+
+### zswap as a zram frontswap — rejected, not a config change
+
+The zswap in this tree is the v3.11-era implementation, not the modern one:
+`mm/Kconfig:564` declares `ZSWAP` as `depends on FRONTSWAP && CRYPTO=y` with
+help text that says "as of v3.11", and `mm/Kconfig:485` documents `FRONTSWAP`
+as caching pages in "transcendent memory" (TMEM) — hardware this MSM8953 does
+not have. `out-oc/.config` has `# CONFIG_FRONTSWAP is not set` and
+`# CONFIG_ZPOOL is not set`, and no `ZSWAP` line at all.
+
+There is also no layer to insert it behind: `drivers/block/zram/zram_drv.c`
+contains no frontswap reference and compresses directly through
+`zcomp_compress()` (line 1463) and `zcomp_decompress()` (line 1383).
+
+The v5.19+ zswap is a rewrite (`zswap_pool`, `zswap_entry`, the `zslot`
+allocator) that calls memcg interfaces a 4.19 `mem_cgroup` does not have.
+Adopting it is a port, not a backport. What this tree can use for the same
+problem — draining compressed pages back to the backing store instead of
+leaving them in RAM — is already enabled: `CONFIG_ZRAM_WRITEBACK=y` and
+`CONFIG_ZRAM_DEFAULT_COMP_ALGORITHM="lz4"` in `out-oc/.config`.
+
+Deferred to the ACK 6.18 route, where a 6.18 zswap can be taken as-is.
+
+### msm8953-mainline 7.1.3 vendor drivers — measured, then declined
+
+Of the six drivers the fork documentation names, two exist here already, two
+do not exist at all, and two exist but must stay disabled:
+
+| fork driver | this tree | state |
+| --- | --- | --- |
+| camss | `drivers/media/platform/qcom/camss/` (17 files) | present, `# CONFIG_VIDEO_QCOM_CAMSS is not set` |
+| venus | `drivers/media/platform/qcom/venus/` | present, no Kconfig symbol in `out-oc/.config` |
+| qcom-smbchg | `drivers/power/supply/qcom/` (`qpnp-smbcharger.c`, `smb5-lib.c`, …) | present as CAF `qpnp-smb*`, `CONFIG_QPNP_SMBCHARGER=y` |
+| pm8994-fg | `drivers/power/supply/qcom/qpnp-fg.c`, `qpnp-fg-gen3.c`, `qpnp-fg-gen4.c` | present as CAF `qpnp-fg`, `CONFIG_QPNP_FG=y` |
+| s5k2xx | none — no `s5k2*` sensor under `drivers/media/i2c/` | absent |
+| qcom-spmi-haptics | none — `drivers/input/misc/qti-haptics.c` binds `qcom,haptics`, `qcom,pm660-haptics`, `qcom,pm8150b-haptics` instead, and is `# CONFIG_INPUT_QTI_HAPTICS is not set` | no counterpart for the fork's binding |
+
+camss and venus are declined, not flipped: the device tree is written for the
+CAF stack — `arch/arm64/boot/dts/vendor/qcom/mi8953/tissot/camera.dtsi:1`
+opens with `&cci {` and children such as `qcom,actuator@1` and
+`qcom,eeprom@2` carrying `qcom,slave-addr`, `qcom,page0`,
+`qcom,eeprom-name = "ofilm_s5k5e8"` — and that binding vocabulary plus the
+ROM's vendor camera/video blobs are what the running system uses. Swapping in
+the fork's camss means rewriting the DT vocabulary and would break camera on
+this ROM.
+
+Device-side evidence that the CAF video stack is the live path: on the
+branch-tip kernel, `/sys/kernel/debug/wakeup_sources` reports active
+`video1`, `video2` and `video3` sources, i.e. video4linux nodes are open.
+The `ls /dev/video*` and `dumpsys media.camera` cross-checks from the
+original plan have not been run yet; they remain open.
+
+s5k2xx and qcom-spmi-haptics are not backports at all — there is nothing to
+port from — they would be new drivers plus DT written against the fork's
+binding, on a CAF 4.19 vendor stack. Out of scope. Haptics is the only one
+with a plausible future home, and it belongs to the ACK 6.18 route where the
+`msm8953-mainline` 7.1.3 line is an actual donor.
