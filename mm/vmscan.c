@@ -5656,6 +5656,12 @@ static int __init init_lru_gen(void)
 	BUILD_BUG_ON(MIN_NR_GENS + 1 >= MAX_NR_GENS);
 	BUILD_BUG_ON(BIT(LRU_GEN_WIDTH) <= MAX_NR_GENS);
 
+	if (arch_has_hw_pte_young())
+		static_branch_enable(&lru_gen_caps[LRU_GEN_MM_WALK]);
+
+	pr_info("lru_gen: pte_young %s, nonleaf_pmd_young %s\n",
+		arch_has_hw_pte_young() ? "yes" : "no",
+		arch_has_hw_nonleaf_pmd_young() ? "yes" : "no");
 
 	if (sysfs_create_group(mm_kobj, &lru_gen_attr_group))
 		pr_err("lru_gen: failed to create sysfs group\n");
