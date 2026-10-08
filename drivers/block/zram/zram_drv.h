@@ -41,7 +41,16 @@
  * The lower ZRAM_FLAG_SHIFT bits is for object size (excluding header),
  * the higher bits is for zram_pageflags.
  */
-#define ZRAM_FLAG_SHIFT 24
+#define ZRAM_FLAG_SHIFT (PAGE_SHIFT + 1)
+#define ZRAM_COMP_PRIORITY_MASK 0x3
+#define ZRAM_PRIMARY_COMP 0U
+#ifdef CONFIG_ZRAM_MULTI_COMP
+#define ZRAM_SECONDARY_COMP 1U
+#define ZRAM_MAX_COMPS 4U
+#else
+#define ZRAM_SECONDARY_COMP 0U
+#define ZRAM_MAX_COMPS 1U
+#endif
 
 /* Flags for zram pages (table[page_no].flags) */
 enum zram_pageflags {
@@ -52,6 +61,9 @@ enum zram_pageflags {
 	ZRAM_UNDER_WB,	/* page is under writeback */
 	ZRAM_HUGE,	/* Incompressible page */
 	ZRAM_IDLE,	/* not accessed page since last idle marking */
+	ZRAM_INCOMPRESSIBLE, /* no configured algorithm improves the class */
+	ZRAM_COMP_PRIORITY_BIT1,
+	ZRAM_COMP_PRIORITY_BIT2,
 
 	__NR_ZRAM_PAGEFLAGS,
 };
@@ -64,6 +76,9 @@ struct zram_entry {
 	u32 checksum;
 	unsigned long refcount;
 	unsigned long handle;
+#ifdef CONFIG_ZRAM_MULTI_COMP
+	u8 comp_priority; /* immutable once inserted in the checksum tree */
+#endif
 };
 
 /* Allocated for each disk page */
@@ -112,7 +127,9 @@ struct zram_hash {
 struct zram {
 	struct zram_table_entry *table;
 	struct zs_pool *mem_pool;
-	struct zcomp *comp;
+	struct zcomp *comps[ZRAM_MAX_COMPS];
+	const char *comp_algs[ZRAM_MAX_COMPS];
+	u32 num_active_comps;
 	struct gendisk *disk;
 	struct zram_hash *hash;
 	size_t hash_size;
@@ -129,7 +146,6 @@ struct zram {
 	 * we can store in a disk.
 	 */
 	u64 disksize;	/* bytes */
-	char compressor[CRYPTO_MAX_ALG_NAME];
 	/*
 	 * zram is claimed so open request will be failed
 	 */

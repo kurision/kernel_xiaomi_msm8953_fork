@@ -72,15 +72,21 @@ static bool zram_dedup_match(struct zram *zram, struct zram_entry *entry,
 	bool match = false;
 	unsigned char *cmem;
 	struct zcomp_strm *zstrm;
+	struct zcomp *comp;
+	u32 priority = ZRAM_PRIMARY_COMP;
 
 	cmem = zs_map_object(zram->mem_pool, entry->handle, ZS_MM_RO);
 	if (entry->len == PAGE_SIZE) {
 		match = !memcmp(mem, cmem, PAGE_SIZE);
 	} else {
-		zstrm = zcomp_stream_get(zram->comp);
+#ifdef CONFIG_ZRAM_MULTI_COMP
+		priority = entry->comp_priority;
+#endif
+		comp = zram->comps[priority];
+		zstrm = zcomp_stream_get(comp);
 		if (!zcomp_decompress(zstrm, cmem, entry->len, zstrm->buffer))
 			match = !memcmp(mem, zstrm->buffer, PAGE_SIZE);
-		zcomp_stream_put(zram->comp);
+		zcomp_stream_put(comp);
 	}
 	zs_unmap_object(zram->mem_pool, entry->handle);
 
@@ -208,6 +214,9 @@ void zram_dedup_init_entry(struct zram *zram, struct zram_entry *entry,
 	entry->handle = handle;
 	entry->refcount = 1;
 	entry->len = len;
+#ifdef CONFIG_ZRAM_MULTI_COMP
+	entry->comp_priority = ZRAM_PRIMARY_COMP;
+#endif
 }
 
 bool zram_dedup_put_entry(struct zram *zram, struct zram_entry *entry)

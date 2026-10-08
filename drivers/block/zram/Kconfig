@@ -15,6 +15,14 @@ config ZRAM
 
 	  See Documentation/blockdev/zram.txt for more information.
 
+config ZRAM_MULTI_COMP
+	bool "Enable multiple compression streams"
+	depends on ZRAM
+	help
+	  Enable multiple compression algorithms for manual recompression of
+	  idle or incompressible pages with potentially more effective codecs.
+	  See Documentation/blockdev/zram.txt for configuration details.
+
 config ZRAM_DEDUP
 	bool "Deduplication support for ZRAM data"
 	depends on ZRAM
