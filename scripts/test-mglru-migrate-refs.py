@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-2.0
 """Check that MGLRU generation and reference bits survive page migration.
 
 Fails without folio_migrate_refs(): a migrated page silently loses its

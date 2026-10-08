@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-2.0
 """Run the real MGLRU aging promotion path against modeled kernel primitives.
 
 Covers folio_update_gen(), folio_inc_gen() and lru_gen_folio_seq(): the code
