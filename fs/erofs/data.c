@@ -7,6 +7,8 @@
 #include "internal.h"
 #include <linux/prefetch.h>
 #include <linux/dax.h>
+#include <linux/uio.h>
+#include <linux/blkdev.h>
 #include <trace/events/erofs.h>
 
 struct page *erofs_get_meta_page(struct super_block *sb, erofs_blk_t blkaddr)

@@ -976,9 +976,9 @@ static void z_erofs_decompressqueue_endio(struct bio *bio)
 	struct z_erofs_decompressqueue *q = tagptr_unfold_ptr(t);
 	blk_status_t err = bio->bi_status;
 	struct bio_vec *bvec;
-	struct bvec_iter_all iter_all;
+	int i;
 
-	bio_for_each_segment_all(bvec, bio, iter_all) {
+	bio_for_each_segment_all(bvec, bio, i) {
 		struct page *page = bvec->bv_page;
 
 		DBG_BUGON(PageUptodate(page));
@@ -1493,7 +1493,7 @@ submit_bio_retry:
 			}
 
 			if (!bio) {
-				bio = bio_alloc(GFP_NOIO, BIO_MAX_VECS);
+				bio = bio_alloc(GFP_NOIO, BIO_MAX_PAGES);
 
 				bio->bi_end_io = z_erofs_decompressqueue_endio;
 				bio_set_dev(bio, sb->s_bdev);

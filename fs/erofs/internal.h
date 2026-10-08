@@ -400,7 +400,7 @@ static inline void *erofs_vm_map_ram(struct page **pages, unsigned int count)
 	int retried = 0;
 
 	while (1) {
-		void *p = vm_map_ram(pages, count, -1);
+		void *p = vm_map_ram(pages, count, -1, PAGE_KERNEL);
 
 		/* retry two more times (totally 3 times) */
 		if (p || ++retried >= 3)
@@ -459,5 +459,9 @@ static inline int z_erofs_load_lz4_config(struct super_block *sb,
 #endif	/* !CONFIG_EROFS_FS_ZIP */
 
 #define EFSCORRUPTED    EUCLEAN         /* Filesystem is corrupted */
+
+#ifndef lru_to_page
+#define lru_to_page(head) (list_entry((head)->prev, struct page, lru))
+#endif
 
 #endif	/* __EROFS_INTERNAL_H */
