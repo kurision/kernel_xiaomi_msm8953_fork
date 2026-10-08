@@ -438,3 +438,6 @@ COND_SYSCALL(setuid16);
 
 /* restartable sequence */
 COND_SYSCALL(rseq);
+
+/* mm/oom_kill.c */
+COND_SYSCALL(process_mrelease);
