@@ -216,19 +216,19 @@ static void unpack_shadow(void *shadow, int *memcgidp, pg_data_t **pgdat,
 
 #ifdef CONFIG_LRU_GEN
 
-void *lru_gen_eviction(struct page *page)
+void *lru_gen_eviction(struct page *folio)
 {
 	int hist;
 	unsigned long token;
 	unsigned long min_seq;
 	struct lruvec *lruvec;
-	struct lru_gen_page *lrugen;
-	int type = page_is_file_cache(page);
-	int delta = hpage_nr_pages(page);
-	int refs = page_lru_refs(page);
+	struct lru_gen_folio *lrugen;
+	int type = folio_is_file_lru(folio);
+	int delta = folio_nr_pages(folio);
+	int refs = folio_lru_refs(folio);
 	int tier = lru_tier_from_refs(refs);
-	struct mem_cgroup *memcg = page_memcg(page);
-	struct pglist_data *pgdat = page_pgdat(page);
+	struct mem_cgroup *memcg = folio_memcg(folio);
+	struct pglist_data *pgdat = folio_pgdat(folio);
 
 	BUILD_BUG_ON(LRU_GEN_WIDTH + LRU_REFS_WIDTH > BITS_PER_LONG - EVICTION_SHIFT);
 
@@ -243,52 +243,80 @@ void *lru_gen_eviction(struct page *page)
 	return pack_shadow(mem_cgroup_id(memcg), pgdat, token, refs);
 }
 
-void lru_gen_refault(struct page *page, void *shadow)
+/*
+ * Tests if the shadow entry belongs to @folio and whether it was evicted
+ * recently. Fills in @lruvec, @token and @workingset with the values unpacked
+ * from shadow. @lruvec is left NULL when the shadow doesn't belong to @folio.
+ * Must be called with rcu_read_lock() held.
+ */
+static bool lru_gen_test_recent(struct page *folio, void *shadow, struct lruvec **lruvec,
+				unsigned long *token, bool *workingset)
 {
-	int hist, tier, refs;
 	int memcg_id;
-	bool workingset;
-	unsigned long token;
-	unsigned long min_seq;
-	struct lruvec *lruvec;
-	struct lru_gen_page *lrugen;
+	unsigned long max_seq;
+	unsigned long seq;
 	struct mem_cgroup *memcg;
 	struct pglist_data *pgdat;
-	int type = page_is_file_cache(page);
-	int delta = hpage_nr_pages(page);
 
-	unpack_shadow(shadow, &memcg_id, &pgdat, &token, &workingset);
+	*lruvec = NULL;
+	unpack_shadow(shadow, &memcg_id, &pgdat, token, workingset);
 
-	if (pgdat != page_pgdat(page))
-		return;
+	if (pgdat != page_pgdat(folio))
+		return false;
 
-	rcu_read_lock();
-
-	memcg = page_memcg_rcu(page);
+	memcg = page_memcg_rcu(folio);
 	/* Swap-cache readahead pages are owned by their swap slot. */
-	if (!memcg && PageSwapCache(page)) {
-		swp_entry_t entry = { .val = page_private(page) };
+	if (!memcg && PageSwapCache(folio)) {
+		swp_entry_t entry = { .val = page_private(folio) };
 		unsigned short id = lookup_swap_cgroup_id(entry);
 
 		if (id)
 			memcg = mem_cgroup_from_id(id);
 	}
 	if (!mem_cgroup_disabled() && !memcg)
-		goto unlock;
+		return false;
 	if (memcg_id != mem_cgroup_id(memcg))
-		goto unlock;
+		return false;
 
-	lruvec = mem_cgroup_lruvec(pgdat, memcg);
-	lrugen = &lruvec->lrugen;
+	*lruvec = mem_cgroup_lruvec(pgdat, memcg);
+
+	max_seq = READ_ONCE((*lruvec)->lrugen.max_seq);
+	max_seq &= EVICTION_MASK >> LRU_REFS_WIDTH;
+
+	seq = *token >> LRU_REFS_WIDTH;
+	/* max_seq and seq are unsigned; a plain subtraction would wrap. */
+	if (max_seq > seq)
+		return max_seq - seq < MAX_NR_GENS;
+
+	return seq - max_seq < MAX_NR_GENS;
+}
+
+void lru_gen_refault(struct page *folio, void *shadow)
+{
+	bool recent;
+	int hist, tier, refs;
+	bool workingset;
+	unsigned long token;
+	struct lruvec *lruvec;
+	struct lru_gen_folio *lrugen;
+	int type = folio_is_file_lru(folio);
+	int delta = folio_nr_pages(folio);
+
+	rcu_read_lock();
+
+	recent = lru_gen_test_recent(folio, shadow, &lruvec, &token, &workingset);
+	if (!lruvec)
+		goto unlock;
 
 	mod_lruvec_state(lruvec, WORKINGSET_REFAULT, delta);
 
-	min_seq = READ_ONCE(lrugen->min_seq[type]);
-	if ((token >> LRU_REFS_WIDTH) != (min_seq & (EVICTION_MASK >> LRU_REFS_WIDTH)))
+	if (!recent)
 		goto unlock;
 
-	hist = lru_hist_from_seq(min_seq);
-	/* see the comment in page_lru_refs() */
+	lrugen = &lruvec->lrugen;
+
+	hist = lru_hist_from_seq(READ_ONCE(lrugen->min_seq[type]));
+	/* see the comment in folio_lru_refs() */
 	refs = (token & (BIT(LRU_REFS_WIDTH) - 1)) + workingset;
 	tier = lru_tier_from_refs(refs);
 
@@ -303,7 +331,7 @@ void lru_gen_refault(struct page *page, void *shadow)
 	 *    numbers of accesses might have been out of the range.
 	 */
 	if (lru_gen_in_fault() || refs == BIT(LRU_REFS_WIDTH)) {
-		SetPageWorkingset(page);
+		SetPageWorkingset(folio);
 		mod_lruvec_state(lruvec, WORKINGSET_RESTORE, delta);
 	}
 unlock:

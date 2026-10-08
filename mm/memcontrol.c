@@ -609,10 +609,8 @@ static void mem_cgroup_update_tree(struct mem_cgroup *memcg, struct page *page)
 	struct mem_cgroup_tree_per_node *mctz;
 
 	if (lru_gen_enabled()) {
-		struct lruvec *lruvec = &mem_cgroup_page_nodeinfo(memcg, page)->lruvec;
-
-		if (soft_limit_excess(memcg) && lru_gen_memcg_seg(lruvec) != MEMCG_LRU_HEAD)
-			lru_gen_rotate_memcg(lruvec, MEMCG_LRU_HEAD);
+		if (soft_limit_excess(memcg))
+			lru_gen_soft_reclaim(memcg, page_to_nid(page));
 		return;
 	}
 
