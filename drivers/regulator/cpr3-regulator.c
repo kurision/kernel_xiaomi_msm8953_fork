@@ -4287,11 +4287,18 @@ EXPORT_SYMBOL(cpr3_regulator_get_corner_limits);
  * @corner:		Voltage corner (offset by CPR3_CORNER_OFFSET)
  * @ceiling_volt:	New ceiling voltage in microvolts
  *
- * The ceiling is rounded up to the controller voltage step. The floor is
- * lowered to the new ceiling when needed and restored to its original value
- * when the ceiling is raised again. The open-loop and last known voltages are
- * kept within the new range, and the controller state is updated so that the
- * new limits take effect immediately.
+ * The ceiling is rounded up to the controller voltage step and capped at the
+ * absolute ceiling of the corner. The difference from the current ceiling is
+ * applied as a voltage margin adjustment to the whole corner, the same way
+ * CPR aging adjustments are applied: the floor, open-loop and last known
+ * voltages move by the same amount, and the target quotients of every active
+ * RO move by the matching RO scaled quotient adjustment. The closed-loop
+ * range of the corner is preserved, so CPR keeps adapting within the shifted
+ * range and settles that much lower (or higher). The unaged voltages move as
+ * well, so a later aging adjustment keeps the userspace adjustment.
+ *
+ * The controller state is updated so that the change takes effect
+ * immediately.
  *
  * Return: 0 on success, errno on failure
  */
@@ -4301,7 +4308,7 @@ int cpr3_regulator_set_corner_ceiling(struct regulator *regulator, int corner,
 	struct cpr3_regulator *vreg = regulator_get_drvdata(regulator);
 	struct cpr3_controller *ctrl;
 	struct cpr3_corner *c;
-	int rc = 0;
+	int i, delta, quot, rc = 0;
 
 	if (!vreg)
 		return -ENODEV;
@@ -4314,14 +4321,44 @@ int cpr3_regulator_set_corner_ceiling(struct regulator *regulator, int corner,
 	mutex_lock(&ctrl->lock);
 
 	c = &vreg->corner[corner];
-	if (!c->default_floor_volt)
-		c->default_floor_volt = c->floor_volt;
+	ceiling_volt = min(CPR3_ROUND(ceiling_volt, ctrl->step_volt),
+			   c->abs_ceiling_volt);
+	delta = ceiling_volt - c->ceiling_volt;
+	if (!delta)
+		goto unlock;
 
-	c->ceiling_volt = CPR3_ROUND(ceiling_volt, ctrl->step_volt);
-	c->floor_volt = min(c->default_floor_volt, c->ceiling_volt);
-	c->open_loop_volt = clamp(c->open_loop_volt, c->floor_volt,
-				  c->ceiling_volt);
-	c->last_volt = clamp(c->last_volt, c->floor_volt, c->ceiling_volt);
+	if (c->floor_volt + delta <= 0) {
+		rc = -EINVAL;
+		goto unlock;
+	}
+
+	for (i = 0; i < CPR3_RO_COUNT; i++) {
+		if (!c->target_quot[i])
+			continue;
+
+		quot = (int)c->target_quot[i]
+			+ cpr3_quot_adjustment(c->ro_scale[i],
+					       c->uv_adjust_volt + delta)
+			- cpr3_quot_adjustment(c->ro_scale[i],
+					       c->uv_adjust_volt);
+		c->target_quot[i] = max(quot, 1);
+	}
+
+	c->uv_adjust_volt += delta;
+	c->ceiling_volt += delta;
+	c->floor_volt += delta;
+	c->open_loop_volt += delta;
+	c->last_volt = clamp(c->last_volt + delta, c->floor_volt,
+			     c->ceiling_volt);
+
+	if (vreg->aging_allowed) {
+		c->unaged_ceiling_volt += delta;
+		c->unaged_floor_volt += delta;
+		c->unaged_open_loop_volt += delta;
+	}
+
+	cpr3_debug(vreg, "corner %d: userspace voltage adjustment %d uV, floor=%d, ceiling=%d uV\n",
+		   corner, c->uv_adjust_volt, c->floor_volt, c->ceiling_volt);
 
 	if (vreg->vreg_enabled) {
 		rc = cpr3_regulator_update_ctrl_state(ctrl);
@@ -4330,6 +4367,7 @@ int cpr3_regulator_set_corner_ceiling(struct regulator *regulator, int corner,
 				 rc);
 	}
 
+unlock:
 	mutex_unlock(&ctrl->lock);
 
 	return rc;

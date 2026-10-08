@@ -617,8 +617,10 @@ static void populate_opp_table(struct platform_device *pdev)
 /*
  * UV_mV_table: one line per CPU frequency, highest first, showing the CPR
  * ceiling voltage of its corner. Writing the same number of space separated
- * millivolt values sets the ceilings in that order. All clusters share one
- * PLL and one CPR regulator, so the power cluster clock describes them all.
+ * millivolt values sets the ceilings in that order; CPR shifts the whole
+ * closed-loop range and target quotients of each corner with its ceiling, so
+ * closed loop keeps running. All clusters share one PLL and one CPR
+ * regulator, so the power cluster clock describes them all.
  */
 static ssize_t show_UV_mV_table(struct cpufreq_policy *policy, char *buf)
 {

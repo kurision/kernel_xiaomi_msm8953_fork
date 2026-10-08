@@ -24,7 +24,9 @@ config MSM8953_CPU_VOLTAGE_CONTROL
 	  lists the CPR ceiling voltage of every CPU frequency, highest
 	  first; writing the same number of space separated millivolt
 	  values sets those ceilings. Values are clamped to 500-1140 mV and
-	  rounded up to 5 mV, and the CPR floor follows a lowered ceiling.
+	  rounded up to 5 mV. Each change is applied as a CPR voltage
+	  margin adjustment: the floor, open-loop voltage and target
+	  quotients move with the ceiling, so CPR closed loop keeps its range.
 
 	  If unsure, say N.
 
