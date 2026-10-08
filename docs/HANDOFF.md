@@ -1,5 +1,36 @@
 # Handoff — Mi A1 (tissot) 4.19 kernel: OC/UC/UV, repartition, flashing
 
+## Session 2026-10-08 night — ThinLTO boot test (LTO validated, CFI in flight)
+
+Follows the backport-execution session below; nothing was flashed, the phone
+was booted with `fastboot boot`.
+
+- `CONFIG_LTO_CLANG=y` committed to `arch/arm64/configs/vendor/tissot.config`
+  (`9db22284c9e7`). `CONFIG_THINLTO=y` follows as the LTO default; `CFI_CLANG`
+  is still off.
+- Built from a clean `out-lto` with the NDK 29 toolchain, `-j12`, 365 s:
+  release `4.19.325-cip136-st20-perf-mglru-next-g517082394561`,
+  `Image.gz-dtb` 17,487,579 B. Zip + `out-lto/boot-lto.img` (base =
+  dumped `boot_a`, CAF cmdline preserved verbatim — the repack script's
+  default `7824900.mmc` names are upstream-only and would break `/system`).
+- Device: `boot_completed=1`, no panic/Oops/BUG, and the only WARNINGs are the
+  three known vendor ones (`irq-gic.c:1008` x2, `smem.c:693`).
+  `scripts/test-tissot-memory.sh` → 14/14 launches, exit 0, 100/200 unchanged.
+  Three lmkd kills happened at ~502 s uptime, during the idle Dozing period
+  before the test, all "low watermark" on cache apps.
+- **Suspend could not be exercised at all.** The framework stays at
+  `mWakefulness=Dozing` with the screen off (also with
+  `dumpsys battery unplug`), `suspend_stats/*` stay 0 and `/proc/uptime`
+  never jumps. Writing `/sys/power/state` fails with EACCES even as
+  `u:r:magisk:s0` and under `setenforce 0` (reads are fine, writes are not).
+  So the prima noirq suspend fix in `d8ddb88c4e11` is still unverified on
+  device, exactly as in the previous session — this is an environment
+  limit, not an LTO symptom.
+- Next: boot the CFI-on-LTO image the same way. A violation panics with a
+  `CFI failure` report; `CFI_PERMISSIVE` stays off, so capture via
+  `pstore`/UART if it dies. Only after that boot test, commit
+  `CONFIG_CFI_CLANG=y`.
+
 ## Session 2026-10-08 evening — backport execution (unpushed work now pushed)
 
 Branch `oc-test-2ghz`, remote `git@github-anil:kurision/kernel_xiaomi_msm8953_fork.git`.
