@@ -77,6 +77,16 @@ config EROFS_FS_ZIP
 
 	  If you don't want to enable compression feature, say N.
 
+config EROFS_FS_ZIP_ZSTD
+	bool "EROFS zstd compressed data support"
+	depends on EROFS_FS_ZIP
+	select ZSTD_DECOMPRESS
+	default y
+	help
+	  Say Y here to enable mounting EROFS images with zstd-compressed
+	  clusters (smaller than LZ4 at a higher decompression cost).
+	  microLZMA/LZMA and DEFLATE images stay unsupported for now.
+
 config EROFS_FS_PCPU_KTHREAD
 	bool "EROFS per-cpu decompression kthread workers"
 	depends on EROFS_FS_ZIP

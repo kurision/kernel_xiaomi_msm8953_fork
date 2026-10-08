@@ -263,6 +263,13 @@ static struct z_erofs_decompressor decompressors[] = {
 		.decompress = z_erofs_lz4_decompress,
 		.name = "lz4"
 	},
+#ifdef CONFIG_EROFS_FS_ZIP_ZSTD
+	[Z_EROFS_COMPRESSION_ZSTD] = {
+		.prepare_destpages = z_erofs_zstd_prepare_destpages,
+		.decompress = z_erofs_zstd_decompress,
+		.name = "zstd"
+	},
+#endif
 };
 
 static void copy_from_pcpubuf(struct page **out, const char *dst,
@@ -301,6 +308,10 @@ static int z_erofs_decompress_generic(struct z_erofs_decompress_req *rq,
 	unsigned int dst_maptype;
 	void *dst;
 	int ret;
+
+	/* LZMA/DEFLATE images, or ZSTD images on a !ZIP_ZSTD kernel */
+	if (rq->alg >= ARRAY_SIZE(decompressors) || !alg->decompress)
+		return -EOPNOTSUPP;
 
 	/* two optimized fast paths only for non bigpcluster cases yet */
 	if (rq->inputsize <= PAGE_SIZE) {

@@ -439,6 +439,22 @@ int erofs_try_to_free_cached_page(struct page *page);
 int z_erofs_load_lz4_config(struct super_block *sb,
 			    struct erofs_super_block *dsb,
 			    struct z_erofs_lz4_cfgs *lz4, int len);
+#ifdef CONFIG_EROFS_FS_ZIP_ZSTD
+int z_erofs_load_zstd_config(struct super_block *sb,
+			     struct erofs_super_block *dsb,
+			     struct z_erofs_zstd_cfgs *zstd, int size);
+#else
+static inline int z_erofs_load_zstd_config(struct super_block *sb,
+				struct erofs_super_block *dsb,
+				struct z_erofs_zstd_cfgs *zstd, int size)
+{
+	if (zstd) {
+		erofs_err(sb, "zstd algorithm isn't enabled");
+		return -EOPNOTSUPP;
+	}
+	return 0;
+}
+#endif
 #else
 static inline void erofs_shrinker_register(struct super_block *sb) {}
 static inline void erofs_shrinker_unregister(struct super_block *sb) {}
