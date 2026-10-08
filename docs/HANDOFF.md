@@ -1,5 +1,40 @@
 # Handoff — Mi A1 (tissot) 4.19 kernel: OC/UC/UV, repartition, flashing
 
+## Session 2026-10-08 evening — backport execution (unpushed work now pushed)
+
+Branch `oc-test-2ghz`, remote `git@github-anil:kurision/kernel_xiaomi_msm8953_fork.git`.
+Pulled remote `9d37111` (test harnesses) via `pull --rebase --autostash`, then
+committed 3 backport commits (see log). Tree builds `Image.gz-dtb` clean.
+Nothing flashed; no device test of the new code yet.
+
+Done and pushed: defconfig flips (`tissot.config`: SCS, slab random+hardened,
+usercopy pagespan, init_on_free, F2FS compression sans ZSTD, EROFS zstd);
+WireGuard refresh (+122/-46, skips documented in message); EROFS zstd
+decoder (`decompressor_zstd.c`, upstream IDs, `-EOPNOTSUPP` guards).
+Full `out/arch/arm64/boot/Image.gz-dtb` (17.7 MB) built with all of it.
+
+Scouted and deliberately NOT ported: schedutil/util_est (tree already
+complete; donor delta is rewrite), overlayfs volatile/verity (no tissot
+consumer), DRM-MSM/a5xx GPU port — REVERTED, dead code: this tree desources
+DRM entirely (`drivers/Kconfig` has no DRM), GPU is KGSL
+(`drivers/gpu/msm/`) + `FB_MSM_MDSS`. Future GPU sourcing = CAF KGSL tags,
+not the 6.12 donor. Vulkan version comes from Mesa/Turnip userspace.
+
+In flight at session end (scratch only, tree untouched): ThinLTO trial
+LINKS CLEAN (17.5 MB); CFI trial was still building in `/tmp/lto-try`
+(killed with session — rerun below). Next session: commit LTO flip only
+after deciding boot-test order; hold CFI until a device-validated boot.
+
+Build policy: `-j12`/`-j16` max, never full `-j$(nproc)` (PC lags).
+Toolchain: system clang-22 + `LLVM=1 LLVM_IAS=1` (no NDK on this host);
+SCS needs `LLVM=1` or the probe silently drops it.
+
+Next-session commands (from repo root):
+`make O=out ARCH=arm64 LLVM=1 vendor/msm8953-perf_defconfig vendor/mi8953.config vendor/tissot.config`
+`make O=out ARCH=arm64 LLVM=1 LLVM_IAS=1 -j12 Image.gz-dtb`
+CFI re-trial: same with `-e CFI_CLANG` on a scratch copy of `out/.config`.
+`OUT_DIR=out scripts/package-tissot.sh` for the flashable zip.
+
 ## Device verification — 2026-10-08
 
 The supplied `new-build` image was packaged with the installed ramdisk and
