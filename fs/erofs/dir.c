@@ -43,10 +43,8 @@ static int erofs_fill_dentries(struct inode *dir, struct dir_context *ctx,
 		unsigned int de_namelen;
 		unsigned char d_type;
 
-		if (de->file_type < EROFS_FT_MAX)
-			d_type = erofs_filetype_table[de->file_type];
-		else
-			d_type = DT_UNKNOWN;
+		d_type = de->file_type < EROFS_FT_MAX ?
+			erofs_filetype_table[de->file_type] : DT_UNKNOWN;
 
 		nameoff = le16_to_cpu(de->nameoff);
 		de_name = (char *)dentry_blk + nameoff;

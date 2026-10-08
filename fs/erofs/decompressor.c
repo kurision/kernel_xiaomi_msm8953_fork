@@ -7,14 +7,7 @@
 #include <linux/module.h>
 #include <linux/lz4.h>
 
-#ifndef LZ4_DISTANCE_MAX	/* history window size */
-#define LZ4_DISTANCE_MAX 65535	/* set to maximum value by default */
-#endif
-
 #define LZ4_MAX_DISTANCE_PAGES	(DIV_ROUND_UP(LZ4_DISTANCE_MAX, PAGE_SIZE) + 1)
-#ifndef LZ4_DECOMPRESS_INPLACE_MARGIN
-#define LZ4_DECOMPRESS_INPLACE_MARGIN(srcsize)  (((srcsize) >> 8) + 32)
-#endif
 
 struct z_erofs_decompressor {
 	/*
@@ -23,7 +16,7 @@ struct z_erofs_decompressor {
 	 */
 	int (*prepare_destpages)(struct z_erofs_decompress_req *rq,
 				 struct list_head *pagepool);
-	int (*decompress)(struct z_erofs_decompress_req *rq, u8 *dst);
+	int (*decompress)(struct z_erofs_decompress_req *rq, u8 *out);
 	char *name;
 };
 
@@ -124,8 +117,8 @@ static int z_erofs_lz4_prepare_destpages(struct z_erofs_decompress_req *rq,
 }
 
 static void *z_erofs_handle_inplace_io(struct z_erofs_decompress_req *rq,
-			void *inpage, void *out, unsigned int *inputmargin,
-			int *maptype, bool support_0padding)
+		void *inpage, void *out, unsigned int *inputmargin, int *maptype,
+		bool support_0padding)
 {
 	unsigned int nrpages_in, nrpages_out;
 	unsigned int ofull, oend, inputsize, total, i;
@@ -356,7 +349,6 @@ static int z_erofs_decompress_generic(struct z_erofs_decompress_req *rq,
 
 dstmap_out:
 	ret = alg->decompress(rq, dst);
-
 	if (!dst_maptype)
 		kunmap_atomic(dst);
 	else if (dst_maptype == 2)

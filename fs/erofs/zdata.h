@@ -90,9 +90,11 @@ struct z_erofs_decompressqueue {
 	z_erofs_next_pcluster_t head;
 
 	union {
-		struct completion done;
+		wait_queue_head_t wait;
 		struct work_struct work;
+#ifdef CONFIG_EROFS_FS_PCPU_KTHREAD
 		struct kthread_work kthread_work;
+#endif
 	} u;
 };
 

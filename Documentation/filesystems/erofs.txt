@@ -38,8 +38,18 @@ Here is the main features of EROFS:
 
  - Support POSIX.1e ACLs by using xattrs;
 
- - Support transparent file compression as an option:
-   LZ4 algorithm with 4 KB fixed-output compression for high performance;
+ - Support transparent LZ4 file compression, compact compression indexes and
+   variable-sized big physical clusters (big pclusters);
+
+ - Support chunk-based uncompressed files, block-map and chunk-index layouts,
+   including sparse holes on a single backing device;
+
+This tree uses the Linux stable v5.15.190 EROFS snapshot adapted to its local
+page-list readpages, iomap, mount-parser, getattr and ACL interfaces. Big pclusters
+were already supported before this update. Chunked-file support is added; later
+EROFS fragments, deduplication and additional decoder formats are not included.
+Unknown incompatible feature bits and invalid superblock checksums remain errors.
+Updating the driver does not convert ext4 partitions or change the ROM's fstab.
 
 The following git tree provides the file system user-space tools under
 development (ex, formatting tool mkfs.erofs):
@@ -52,11 +62,6 @@ linux-erofs mailing list:
 Mount options
 =============
 
-fault_injection=%d     Enable fault injection in all supported types with
-                       specified injection rate. Supported injection type:
-                       Type_Name                Type_Value
-                       FAULT_KMALLOC            0x000000001
-                       FAULT_READ_IO            0x000000002
 (no)user_xattr         Setup Extended User Attributes. Note: xattr is enabled
                        by default if CONFIG_EROFS_FS_XATTR is selected.
 (no)acl                Setup POSIX Access Control List. Note: acl is enabled
@@ -71,10 +76,10 @@ cache_strategy=%s      Select a strategy for cached decompression from now on:
                                    physical clusters for further reading.
                                    It still does in-place I/O decompression
                                    for the rest compressed physical clusters.
+dax, dax=always        Force DAX when CONFIG_FS_DAX and the backing device support
+                       it; this remains experimental.
+dax=never             Disable DAX.
 
-Module parameters
-=================
-use_vmap=[0|1]         Use vmap() instead of vm_map_ram() (default 0).
 
 On-disk details
 ===============
@@ -137,13 +142,14 @@ may not. All metadatas can be now observed in two different spaces (views):
                                         |                  |
                                         |__________________| 64 bytes
 
-    Xattrs, extents, data inline are followed by the corresponding inode with
-    proper alignes, and they could be optional for different data mappings,
-    _currently_ there are totally 3 valid data mappings supported:
+    Xattrs, extents and inline data follow the corresponding inode with proper
+    alignment and are optional according to the data layout:
 
-     1) flat file data without data inline (no extent);
-     2) fixed-output size data compression (must have extents);
-     3) flat file data with tail-end data inline (no extent);
+     1) flat file data without inline data;
+     2) legacy compressed data with full compression indexes;
+     3) flat file data with tail-end inline data;
+     4) compressed data with compact compression indexes;
+     5) chunk-based uncompressed data using block addresses or chunk indexes.
 
     The size of the optional xattrs is indicated by i_xattr_count in inode
     header. Large xattrs or xattrs shared by many different files can be
@@ -191,8 +197,8 @@ introduce another on-disk field at all.
 
 Compression
 -----------
-Currently, EROFS supports 4KB fixed-output clustersize transparent file
-compression, as illustrated below:
+EROFS describes compressed files in 4KB logical clusters, with variable-length
+extents spanning one or more logical clusters, as illustrated below:
 
          |---- Variant-Length Extent ----|-------- VLE --------|----- VLE -----
          clusterofs                      clusterofs            clusterofs
@@ -211,9 +217,22 @@ ____|____.________|_____________|________.____|_____________|__.__________|____
              |-> cluster <-|-> cluster <-|-> cluster <-|
                   size          size          size
 
-Currently each on-disk physical cluster can contain 4KB (un)compressed data
-at most. For each logical cluster, there is a corresponding on-disk index to
-describe its cluster type, physical cluster address, etc.
+Physical clusters may span multiple 4KB blocks with the big-pcluster feature.
+Each logical cluster has a full or compact compression index describing its
+type, the physical cluster or its relationship to the extent's head cluster.
 
 See "struct z_erofs_vle_decompressed_index" in erofs_fs.h for more details.
 
+
+Local decompression workers
+==========================
+CONFIG_EROFS_FS_PCPU_KTHREAD retains optional per-CPU kthread workers for async
+decompression in atomic/IRQ contexts, with workqueue fallback. The HIPRI option
+retains FIFO-low scheduling. Synchronous reads use the stable snapshot's
+waitqueue completion; CPU-offline clears the published worker and waits for RCU
+readers before destruction. Worker initialization failures unwind the pool and
+workqueue. No additional worker policy or DAX enablement is introduced.
+
+The backport is source-edit only: not compiled or runtime-tested. Later authorized
+verification must cover old LZ4 images, big pclusters, chunked files and rejection
+of malformed metadata, with workers enabled/disabled and compression disabled.
