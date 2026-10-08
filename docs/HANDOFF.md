@@ -1,5 +1,57 @@
 # Handoff — Mi A1 (tissot) 4.19 kernel: OC/UC/UV, repartition, flashing
 
+## Tissot backports — edit-only work on `oc-test-2ghz`
+
+All changes are in `kernel_xiaomi_msm8953_fork-oc`. Pre-existing
+case-collision/netfilter and litmus-test modifications are preserved.
+Implementation was edit-only; local commits were subsequently authorized and
+grouped by backport, with this handoff in a separate documentation commit.
+No build, compiler-driven regression, runtime/device test, push, boot or flash
+was performed.
+
+`process_mrelease` uses syscall 448 on native arm64 and AArch32, with
+`mmget_not_zero()` / `mmput()` lifetime protection and an OOM-skip recheck
+under the mmap read lock. It does not mark ordinary victims as OOM victims.
+Its target-kernel regression source is
+`tools/testing/selftests/vm/mrelease_test.c`; maximum allocation is 64 MiB.
+Native and compat execution remain unverified.
+
+The LZ4 update targets upstream 1.9.4 with caller-owned workspaces.
+HC optimal-parser scratch belongs to that workspace, not the stack or
+an allocation during compression. The later host-only regression command
+is `python3 scripts/test-lz4-library.py`; do not mistake host codec proof
+for target-kernel build or device proof.
+
+Zstd uses Linux v6.2's kernel port of 1.5.2 and its lowercase public API.
+Crypto, Btrfs, F2FS, Incremental FS, SquashFS and pstore consumers are
+migrated without importing their newer filesystem implementations.
+The obsolete flat library is removed; common/compress/decompress share
+`ZSTD_COMMON`. Userspace Incremental FS tools retain userspace APIs.
+LZ4 remains the configured primary zram compressor.
+
+Zram secondary compression is enabled but opt-in: configure
+`recomp_algorithm` before `disksize`, then manually trigger `recompress`.
+Reads and duplicate writes use the stored entry's compression priority;
+recompression replaces one slot without mutating shared dedup entries.
+`tools/testing/selftests/zram/zram_recompress.py` hot-adds an isolated device,
+checks byte equality/storage reduction, overwrite/discard, primary zstd,
+shared entries and reset lifecycle. It has not been run.
+
+
+EROFS uses the coherent Linux stable v5.15.190 filesystem and trace snapshot.
+Chunked files are added; existing big-pcluster support is retained. Local
+readpages/iomap/parser/getattr/ACL boundaries are adapted without upgrading VFS.
+Optional per-CPU workers and FIFO-low scheduling remain, with RCU-safe offline,
+initialization unwind and donor waitqueue synchronization. Unknown incompatible
+features and checksum failures remain errors. No ROM/fstab/partition changes.
+
+All five backports remain **not compiled or runtime-tested; not ready to flash**.
+Later gates: actual-source LZ4 sanitizer harness, case-sensitive Linux tissot
+build plus codecs/multi-off/multi-dedup/erofs-no-workers/erofs-no-zip matrix,
+native and AArch32 mrelease on the target, isolated zram regression (including
+dedup build), and EROFS old/big-pcluster/chunked/corrupt-image device fixtures.
+No host-kernel syscall run or packaging result substitutes for target proof.
+
 ## Latest session — MGLRU test branch (2026-10-04)
 
 This section supersedes the old snapshot below. Full port notes, fixes and verification: [mglru-port-design.md](mglru-port-design.md).
