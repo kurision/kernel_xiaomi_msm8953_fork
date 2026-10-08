@@ -32,6 +32,8 @@ code = r'''
 #define LRU_REFS_PGOFF 8
 #define LRU_REFS_MASK (3UL << LRU_REFS_PGOFF)
 #define MAX_NR_TIERS 4
+#define MAX_NR_GENS 4
+#define abs(x) ((x) < 0 ? -(x) : (x))
 #define PG_workingset 0
 #define PG_referenced 1
 #define PG_swapbacked 2
@@ -41,11 +43,12 @@ code = r'''
 #define max(a, b) ((a) > (b) ? (a) : (b))
 typedef unsigned long atomic_long_t;
 struct lru_gen_struct {
+    unsigned long max_seq;
     unsigned long min_seq[2];
     atomic_long_t evicted[1][2][MAX_NR_TIERS];
     atomic_long_t refaulted[1][2][MAX_NR_TIERS];
 };
-#define lru_gen_page lru_gen_struct
+#define lru_gen_folio lru_gen_struct
 struct lruvec { struct lru_gen_struct lrugen; unsigned long stats[3]; };
 typedef struct pglist_data { int node_id; } pg_data_t;
 static pg_data_t nodes[2] = {{0}, {1}};
@@ -92,8 +95,11 @@ static struct mem_cgroup *mem_cgroup_from_id(int id) {
     return NULL;
 }
 static pg_data_t *page_pgdat(struct page *p) { return p->node; }
-static int page_is_file_cache(struct page *p) { return !(p->flags & BIT(PG_swapbacked)); }
-static int hpage_nr_pages(struct page *p) { return p->nr; }
+static int folio_is_file_lru(struct page *p) { return !(p->flags & BIT(PG_swapbacked)); }
+static int folio_nr_pages(struct page *p) { return p->nr; }
+static struct mem_cgroup *folio_memcg(struct page *p) { return p->memcg; }
+static pg_data_t *folio_pgdat(struct page *p) { return p->node; }
+
 static struct lruvec *mem_cgroup_lruvec(pg_data_t *node, struct mem_cgroup *m) {
     if (disabled) return &root;
     assert(m == &groups[0] || m == &groups[1]);
@@ -104,15 +110,12 @@ static bool lru_gen_in_fault(void) { return in_fault; }
 static void atomic_long_add(int delta, atomic_long_t *v) { *v += delta; }
 static void mod_lruvec_state(struct lruvec *v, int stat, int delta) { v->stats[stat] += delta; }
 '''
-inline = (repo / 'include/linux/mm_inline.h').read_text()
-if 'static inline int page_lru_refs(' in inline:
-    code += '\n' + function('include/linux/mm_inline.h', 'static inline int page_lru_refs(')
-else:
-    code += '\n' + function('mm/workingset.c', 'static int page_lru_refs(')
+code += '\n' + function('include/linux/mm_inline.h', 'static inline int folio_lru_refs(')
 code += '\n' + function('include/linux/mm_inline.h', 'static inline int lru_tier_from_refs(')
 code += '\n' + function('mm/workingset.c', 'static void *pack_shadow(')
 code += '\n' + function('mm/workingset.c', 'static void unpack_shadow(')
 code += '\n' + function('mm/workingset.c', 'void *lru_gen_eviction(')
+code += '\n' + function('mm/workingset.c', 'static bool lru_gen_test_recent(')
 code += '\n' + function('mm/workingset.c', 'void lru_gen_refault(')
 code += r'''
 int main(void) {
@@ -121,11 +124,12 @@ int main(void) {
     for (int refs = 0; refs <= 4; refs++) {
         page.flags = refs ? BIT(PG_workingset) | BIT(PG_referenced) |
                      ((unsigned long)(refs - 1) << LRU_REFS_PGOFF) : 0;
-        assert(page_lru_refs(&page) == refs);
+        assert(folio_lru_refs(&page) == refs);
         assert(lru_tier_from_refs(refs) == tiers[refs]);
         struct lruvec *v = &lruvecs[0][0];
         memset(v, 0, sizeof(*v));
         v->lrugen.min_seq[1] = 7;
+        v->lrugen.max_seq = 7;
         void *shadow = lru_gen_eviction(&page);
         int id; pg_data_t *node; unsigned long token; bool workingset;
         unpack_shadow(shadow, &id, &node, &token, &workingset);
@@ -145,6 +149,8 @@ int main(void) {
     memset(lruvecs, 0, sizeof(lruvecs));
     lruvecs[0][0].lrugen.min_seq[1] = 7;
     lruvecs[0][1].lrugen.min_seq[1] = 7;
+    lruvecs[0][0].lrugen.max_seq = 7;
+    lruvecs[0][1].lrugen.max_seq = 7;
     page.flags = 0;
     page.memcg = &groups[1];
     lru_gen_refault(&page, pack_shadow(17, &nodes[0], 28, false));
@@ -166,6 +172,7 @@ int main(void) {
     page.private = 42;
     page.flags = BIT(PG_swapbacked);
     lruvecs[0][0].lrugen.min_seq[0] = 7;
+    lruvecs[0][0].lrugen.max_seq = 7;
     lru_gen_refault(&page, pack_shadow(17, &nodes[0], 28, false));
     assert(lruvecs[0][0].stats[WORKINGSET_REFAULT] == 1);
     assert(lruvecs[0][0].lrugen.refaulted[0][0][0] == 1);
@@ -179,7 +186,7 @@ int main(void) {
 	assert(lruvecs[0][0].stats[WORKINGSET_REFAULT] == 1 && !rcu_depth);
 
     /* Stale generations count refaults, but cannot train generation feedback. */
-    lru_gen_refault(&page, pack_shadow(17, &nodes[0], 24, false));
+    lru_gen_refault(&page, pack_shadow(17, &nodes[0], (7 - MAX_NR_GENS - 1) << LRU_REFS_WIDTH, false));
 	assert(lruvecs[0][0].stats[WORKINGSET_REFAULT] == 2);
     assert(!lruvecs[0][0].lrugen.refaulted[0][1][0]);
 
@@ -187,6 +194,7 @@ int main(void) {
     unsigned long seq = (EVICTION_MASK >> LRU_REFS_WIDTH) + 1;
     struct lruvec *v = &lruvecs[0][0];
     v->lrugen.min_seq[1] = seq;
+    v->lrugen.max_seq = seq;
     page.flags = BIT(PG_workingset) | BIT(PG_referenced) | LRU_REFS_MASK;
     page.nr = 512;
     void *shadow = lru_gen_eviction(&page);
@@ -204,11 +212,32 @@ int main(void) {
     page.memcg = NULL;
     page.nr = 1;
     root.lrugen.min_seq[0] = 3;
+    root.lrugen.max_seq = 3;
     shadow = lru_gen_eviction(&page);
     lru_gen_refault(&page, shadow);
     assert(root.lrugen.refaulted[0][0][0] == 1);
     assert(root.stats[WORKINGSET_RESTORE] == 1 && PageWorkingset(&page));
     assert(!rcu_depth);
+
+    /*
+     * A shadow from a newer generation is still recent. The comparison is
+     * unsigned on both sides, so it must not wrap around.
+     */
+    disabled = false;
+    in_fault = false;
+    page.flags = 0;
+    page.memcg = &groups[0];
+    page.nr = 1;
+    v = &lruvecs[0][0];
+    memset(v, 0, sizeof(*v));
+    v->lrugen.min_seq[1] = 7;
+    v->lrugen.max_seq = 7;
+    lru_gen_refault(&page, pack_shadow(17, &nodes[0], (7 + 1) << LRU_REFS_WIDTH, false));
+    assert(v->lrugen.refaulted[0][1][0] == 1);
+    lru_gen_refault(&page, pack_shadow(17, &nodes[0], (7 + MAX_NR_GENS) << LRU_REFS_WIDTH, false));
+    assert(v->lrugen.refaulted[0][1][0] == 1);
+    assert(!rcu_depth);
+
     puts("PASS: reference tiers, tokens, refault ownership, stale/wrapped generations, THP, disabled memcg");
 }
 '''

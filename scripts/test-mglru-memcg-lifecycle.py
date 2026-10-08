@@ -8,8 +8,8 @@ import tempfile
 repo = Path(__file__).resolve().parent.parent
 
 
-def function(signature):
-    text = (repo / 'mm/memcontrol.c').read_text()
+def function(signature, path='mm/memcontrol.c'):
+    text = (repo / path).read_text()
     start = text.index(signature)
     return text[start:text.index('\n}', start) + 2]
 
@@ -61,9 +61,29 @@ static void lru_gen_release_memcg(struct mem_cgroup *memcg)
     assert(memcg->invalidated && !memcg->released);
     memcg->released = 1;
 }
+
+/* lru_gen_soft_reclaim() model: only a soft-limit-exceeding memcg is rotated. */
+struct lru_gen_folio { unsigned long seg; };
+struct lruvec { struct lru_gen_folio lrugen; };
+static struct lruvec lruvec;
+static struct lruvec *get_lruvec(struct mem_cgroup *memcg, int nid)
+{
+    (void)memcg;
+    assert(nid == 0);
+    return &lruvec;
+}
+static int seg_rotated;
+static void lru_gen_rotate_memcg(struct lruvec *vec, int op)
+{
+    vec->lrugen.seg = op;
+    seg_rotated++;
+}
+#define MEMCG_LRU_HEAD 1
+#define READ_ONCE(x) (x)
 '''
 code += '\n' + function('static void mem_cgroup_css_offline(')
 code += '\n' + function('static void mem_cgroup_css_released(')
+code += '\n' + function('void lru_gen_soft_reclaim(', 'mm/vmscan.c')
 code += r'''
 int main(void)
 {
@@ -71,7 +91,19 @@ int main(void)
     assert(group.offlined && !group.id_live);
     mem_cgroup_css_released(&group.css);
     assert(group.invalidated && group.released);
-    puts("PASS: memcg offlining and release ordering");
+
+    /* A memcg already at the head is left alone. */
+    lruvec.lrugen.seg = MEMCG_LRU_HEAD;
+    seg_rotated = 0;
+    lru_gen_soft_reclaim(&group, 0);
+    assert(!seg_rotated && lruvec.lrugen.seg == MEMCG_LRU_HEAD);
+
+    /* Any other segment is rotated to the head. */
+    lruvec.lrugen.seg = 3;
+    lru_gen_soft_reclaim(&group, 0);
+    assert(seg_rotated == 1 && lruvec.lrugen.seg == MEMCG_LRU_HEAD);
+
+    puts("PASS: memcg offlining and release ordering, lru_gen_soft_reclaim rotation");
 }
 '''
 
