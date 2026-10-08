@@ -1,6 +1,6 @@
 # Handoff — Mi A1 (tissot) 4.19 kernel: OC/UC/UV, repartition, flashing
 
-## Session 2026-10-08 night — ThinLTO boot test (LTO validated, CFI in flight)
+## Session 2026-10-08 night — ThinLTO boot test (LTO validated, CFI dropped)
 
 Follows the backport-execution session below; nothing was flashed, the phone
 was booted with `fastboot boot`.
@@ -26,10 +26,26 @@ was booted with `fastboot boot`.
   So the prima noirq suspend fix in `d8ddb88c4e11` is still unverified on
   device, exactly as in the previous session — this is an environment
   limit, not an LTO symptom.
-- Next: boot the CFI-on-LTO image the same way. A violation panics with a
-  `CFI failure` report; `CFI_PERMISSIVE` stays off, so capture via
-  `pstore`/UART if it dies. Only after that boot test, commit
-  `CONFIG_CFI_CLANG=y`.
+- **CFI is dropped, not fixed.** `CONFIG_CFI_CLANG=y` on top of ThinLTO
+  links fine (19,238,731 B) but panics 1.24 s into boot, straight into
+  recovery: `Kernel panic - not syncing: CFI failure (target:
+  camera_legacy_init+0x0/0xb0)`, via `__cfi_slowpath → do_one_initcall`
+  (full trace in `out-lto/pstore-cfi-dmesg.txt`, pulled from
+  `/sys/fs/pstore/dmesg-ramoops-0` while sitting in recovery). A
+  `CFI_PERMISSIVE=y` diagnostic build then booted to completion and
+  enumerated **61 violations in 61 s** (`out-lto/dmesg-cfi-perm.txt`):
+  17 `WLANTL_RxFrames`, 13 `ipa_wwan_xmit`, 11 `WDA_DS_TxCompleteCB`,
+  5 `video_ioctl2` (mainline `drivers/media/v4l2-core/v4l2-ioctl.c`),
+  4 `msm_subscribe_event`, 3 `msm_sd_notify`, 2 `msm_init`, plus
+  `msm_probe`, `msm_open`, `hdd_hard_start_xmit`,
+  `wlan_hdd_change_country_code_callback`, `camera_legacy_init` and
+  `camera_legacy_n_init`. These are calls through function-pointer tables
+  (v4l2 ops, CAF WLAN callbacks, driver `probe`/`open`) whose CFI types do
+  not match, not defects in the backports; `CFI_CLANG_SHADOW` is what makes
+  the indirect calls checkable in the first place. Fixing them means
+  annotating or casting those tables, mainline files included, so the
+  decision is to keep ThinLTO only and leave `CONFIG_CFI_CLANG` off.
+  Nothing was flashed; the phone is back on its installed image.
 
 ## Session 2026-10-08 evening — backport execution (unpushed work now pushed)
 
