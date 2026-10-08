@@ -143,8 +143,9 @@ static inline uint16_t get_unaligned_le16(const void *p) {
 static inline void put_unaligned_le16(uint16_t v, void *p) {
     uint8_t *d = p; d[0] = v; d[1] = v >> 8;
 }
-#define get_unaligned(p) ({ union { __typeof__(*(p)) value; unsigned char raw[sizeof(*(p))]; } u; memcpy(u.raw, (p), sizeof(u.raw)); u.value; })
-#define put_unaligned(v,p) do { __typeof__(*(p)) value = (v); memcpy((p), &value, sizeof(value)); } while (0)
+/* Match kernel packed unaligned access, including const-qualified input. */
+#define get_unaligned(p) ({ const struct { __typeof__(*(p)) value; } __attribute__((packed)) *u = (const void *)(p); u->value; })
+#define put_unaligned(v,p) do { struct { __typeof__(*(p)) value; } __attribute__((packed)) *u = (void *)(p); u->value = (v); } while (0)
 ''',
 }
 cc = shlex.split(os.environ.get('CC', 'cc'))

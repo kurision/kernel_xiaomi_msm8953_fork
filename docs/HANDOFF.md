@@ -1,6 +1,39 @@
 # Handoff — Mi A1 (tissot) 4.19 kernel: OC/UC/UV, repartition, flashing
 
-## Tissot backports — edit-only work on `oc-test-2ghz`
+## Device verification — 2026-10-08
+
+The supplied `new-build` image was packaged with the installed ramdisk and
+temporarily booted on tissot; no partition was flashed. Running release:
+`4.19.325-cip136-st20-perf-mglru-next-g7ea9cea78e9e-dirty`.
+The supplied build's dirty-tree changes were not independently audited.
+
+- Native arm64 and AArch32 `mrelease_test.c` passed, each observing successful
+  victim reaping rather than treating ESRCH as success.
+- The actual-source host LZ4 ASan/UBSan harness passed after replacing its
+  host-only union/memcpy unaligned shim with kernel-style packed access.
+- A temporary native target helper exercised an isolated hot-added zram device:
+  byte equality before/after LZ4-to-zstd recompression, overwrite/discard,
+  primary-only codecs and eight reset/configure cycles. The 4 MiB fixture's
+  compressed storage fell from 4,194,304 to 2,132,882 bytes. zram0 was untouched.
+  Python 3 is absent, so the original Python test returned SKIP (4).
+  `CONFIG_ZRAM_DEDUP=n` retains a read-only `use_dedup`; the Python test now
+  skips that disabled variant while retaining failure for a writable store.
+- EROFS legacy compressed, 64 KiB big-pcluster, chunked and checksum-enabled
+  fixtures passed full data/metadata verification, including chunked direct I/O.
+  Bad checksum, unknown incompatible feature and truncated fixtures failed mount
+  with the expected kernel diagnostics. Owned fixture loops were detached.
+- Two 14-app rounds plus a 180-second idle soak lasted 338.54 seconds.
+  All 28 starts succeeded; boot ID stayed unchanged. No new panic, Oops, BUG,
+  WARNING, lockup or RCU-stall signature was observed; the Android crash buffer
+  was empty. OOM-kill delta was zero; one allocation stall was recorded.
+  Monitored peaks: CPU 62.6 C, battery 33.7 C. Tuning stayed at 100/200.
+
+Evidence is in `out/regression-20261008-165730/`. This is bounded functional
+and stability proof, not a controlled old/new performance comparison or a
+long-duration soak. Dedup/multi-off/codecs-off/EROFS-workers-off/ZIP-off build
+variants and deliberate CPU-hotplug stress remain unverified.
+
+## Source handoff snapshot — edit-only work on `oc-test-2ghz`
 
 All changes are in `kernel_xiaomi_msm8953_fork-oc`. Pre-existing
 case-collision/netfilter and litmus-test modifications are preserved.

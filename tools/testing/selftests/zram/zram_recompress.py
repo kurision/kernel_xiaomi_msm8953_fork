@@ -163,9 +163,9 @@ def run():
         fd = None
         write_attr(base, 'reset', '1')
         dedup = base / 'use_dedup'
-        if dedup.exists():
-            if not dedup.stat().st_mode & 0o222:
-                raise AssertionError('compiled dedup setting is not writable')
+        # CONFIG_ZRAM_DEDUP=n retains a read-only use_dedup ABI.
+        # A writable attribute must still fail the test if its store fails.
+        if dedup.exists() and dedup.stat().st_mode & 0o222:
             write_attr(base, 'use_dedup', '1')
             configure(base, 'lz4', True)
             fd = open_device(node)
