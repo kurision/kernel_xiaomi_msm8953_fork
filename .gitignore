@@ -145,3 +145,6 @@ out/*
 #Local agent workspace instructions
 #
 AGENTS.md
+out-lto/*
+out-merge/*
+out-oc/*
