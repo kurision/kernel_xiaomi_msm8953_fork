@@ -23,6 +23,9 @@
 #include <linux/of_device.h>
 #include <linux/cpu_cooling.h>
 #include <trace/events/power.h>
+#include <linux/fb.h>
+#include <linux/notifier.h>
+#include <linux/workqueue.h>
 
 static DEFINE_MUTEX(l2bw_lock);
 
@@ -298,11 +301,142 @@ static struct notifier_block msm_cpufreq_pm_notifier = {
 	.notifier_call = msm_cpufreq_pm_event,
 };
 
-static struct freq_attr *msm_freq_attr[] = {
+/*
+ * Screen-off frequency ceiling.
+ *
+ * Userspace wants the big cluster capped while the panel is dark, but must
+ * not have to hold a frequency: the ceiling goes through the CPUFREQ_ADJUST
+ * hook, so the governor keeps choosing inside [min, cap] exactly as it does
+ * on screen-on. Only policy->max is touched, so a scaling_max_freq the user
+ * set lower still wins, and waking the screen restores the hardware table
+ * ceiling rather than some remembered value.
+ *
+ * The display reports blanking through the fb notifier chain
+ * (drivers/video/fbdev/core/fbmem.c: fb_blank()). FB_EVENT_BLANK carries the
+ * new blank mode in event->data, so one event covers both directions: any
+ * mode other than FB_BLANK_UNBLANK caps, FB_BLANK_UNBLANK releases.
+ */
+static unsigned int screen_off_cap_khz = 1401600;
+
+/* Written by the fb notifier, read by the CPUFREQ_ADJUST hook: WRITE_ONCE/READ_ONCE. */
+static bool screen_off_capped;
+
+/*
+ * Re-evaluating policies must not run inside the fb notifier: that chain is
+ * called from the display stack (composer holds mdp locks there), and
+ * cpufreq_update_policy() takes the hotplug and policy locks. Doing it inline
+ * deadlocked composer@2.1-se in cpufreq_update_policy on this device.
+ * Defer to a workqueue so the notifier only records the state and returns.
+ */
+static void cpufreq_screen_off_work(struct work_struct *work);
+static DECLARE_DELAYED_WORK(screen_off_work, cpufreq_screen_off_work);
+
+static void cpufreq_screen_off_work(struct work_struct *work)
+{
+	unsigned int cpu;
+
+	get_online_cpus();
+	for_each_online_cpu(cpu)
+		cpufreq_update_policy(cpu);
+	put_online_cpus();
+}
+
+static void cpufreq_update_policies(void)
+{
+	schedule_delayed_work(&screen_off_work, 0);
+}
+
+static int msm_cpufreq_screen_off_adjust(struct notifier_block *nb,
+					 unsigned long val, void *data)
+{
+	struct cpufreq_policy *policy = data;
+	unsigned int cap = READ_ONCE(screen_off_cap_khz);
+
+	if (val != CPUFREQ_ADJUST || !READ_ONCE(screen_off_capped))
+		return NOTIFY_OK;
+
+	if (policy->max > cap) {
+		pr_debug("policy %u: capping max %u -> %u kHz (screen off)\n",
+			policy->cpu, policy->max, cap);
+		cpufreq_verify_within_limits(policy, policy->min, cap);
+	}
+
+	return NOTIFY_OK;
+}
+
+static struct notifier_block msm_cpufreq_adjust_notifier = {
+	.notifier_call = msm_cpufreq_screen_off_adjust,
+};
+
+static int msm_cpufreq_fb_event(struct notifier_block *nb, unsigned long val,
+				void *data)
+{
+	struct fb_event *event = data;
+	bool capped;
+
+	if (val != FB_EVENT_BLANK || !event->data)
+		return NOTIFY_OK;
+
+	capped = *(int *)event->data != FB_BLANK_UNBLANK;
+	if (capped == READ_ONCE(screen_off_capped))
+		return NOTIFY_OK;
+
+	pr_info("screen %s: CPU ceiling %s\n",
+		capped ? "off" : "on",
+		capped ? "applied" : "released");
+	WRITE_ONCE(screen_off_capped, capped);
+	cpufreq_update_policies();
+
+	return NOTIFY_OK;
+}
+
+static struct notifier_block msm_cpufreq_fb_notifier = {
+	.notifier_call = msm_cpufreq_fb_event,
+};
+
+static ssize_t screen_off_cap_show(struct cpufreq_policy *policy,
+				   char *buf)
+{
+	return sprintf(buf, "%u\n", screen_off_cap_khz);
+}
+
+static ssize_t screen_off_cap_store(struct cpufreq_policy *policy,
+				    const char *buf, size_t count)
+{
+	unsigned int khz;
+	int ret;
+
+	ret = kstrtouint(buf, 0, &khz);
+	if (ret)
+		return ret;
+	if (!khz)
+		return -EINVAL;
+
+	WRITE_ONCE(screen_off_cap_khz, khz);
+	if (READ_ONCE(screen_off_capped))
+		cpufreq_update_policies();
+
+	return count;
+}
+
+static struct freq_attr screen_off_cap_attr =
+	__ATTR(screen_off_cap_khz, 0644, screen_off_cap_show,
+	       screen_off_cap_store);
+
+
+static void msm_cpufreq_screen_off_init(void)
+{
+	cpufreq_register_notifier(&msm_cpufreq_adjust_notifier,
+				 CPUFREQ_POLICY_NOTIFIER);
+	fb_register_client(&msm_cpufreq_fb_notifier);
+}
+
+static struct freq_attr *msm_policy_attr[] = {
 	&cpufreq_freq_attr_scaling_available_freqs,
 #ifdef CONFIG_MSM8953_CPU_VOLTAGE_CONTROL
 	&msm8953_uv_mv_table,
 #endif
+	&screen_off_cap_attr,
 	NULL,
 };
 
@@ -343,7 +477,7 @@ static struct cpufreq_driver msm_cpufreq_driver = {
 	.resolve_freq	= msm_cpufreq_resolve_freq,
 	.get		= msm_cpufreq_get_freq,
 	.name		= "msm",
-	.attr		= msm_freq_attr,
+	.attr		= msm_policy_attr,
 	.ready		= msm_cpufreq_ready,
 };
 
@@ -483,10 +617,14 @@ out_register:
 		return ret;
 
 	ret = cpufreq_register_driver(&msm_cpufreq_driver);
-	if (ret)
+	if (ret) {
 		unregister_pm_notifier(&msm_cpufreq_pm_notifier);
+		return ret;
+	}
 
-	return ret;
+	msm_cpufreq_screen_off_init();
+
+	return 0;
 }
 
 static const struct of_device_id msm_cpufreq_match_table[] = {
