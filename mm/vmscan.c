@@ -2616,16 +2616,9 @@ DEFINE_STATIC_KEY_ARRAY_FALSE(lru_gen_caps, NR_LRU_GEN_CAPS);
 #define get_cap(cap)	static_branch_unlikely(&lru_gen_caps[cap])
 #endif
 
-/*
- * Without a hardware access flag (e.g. Cortex-A53) the accessed bit is still
- * maintained by access-flag faults, so the walk works, at the cost of one
- * minor fault per page touched after its bit is cleared. init_lru_gen() only
- * enables it by default with hardware support; userspace may opt in by
- * writing the MM_WALK bit to /sys/kernel/mm/lru_gen/enabled.
- */
 static bool should_walk_mmu(void)
 {
-	return get_cap(LRU_GEN_MM_WALK);
+	return arch_has_hw_pte_young() && get_cap(LRU_GEN_MM_WALK);
 }
 
 static bool should_clear_pmd_young(void)
