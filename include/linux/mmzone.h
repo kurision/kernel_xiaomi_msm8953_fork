@@ -311,6 +311,7 @@ struct page_vma_mapped_walk;
 
 #define LRU_GEN_MASK		((BIT(LRU_GEN_WIDTH) - 1) << LRU_GEN_PGOFF)
 #define LRU_REFS_MASK		((BIT(LRU_REFS_WIDTH) - 1) << LRU_REFS_PGOFF)
+#define LRU_REFS_FLAGS		(BIT(PG_referenced) | BIT(PG_workingset))
 
 /* see the comment on MEMCG_NR_GENS */
 enum {
