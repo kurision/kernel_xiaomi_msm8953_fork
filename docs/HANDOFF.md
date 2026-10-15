@@ -1,5 +1,41 @@
 # Handoff — Mi A1 (tissot) 4.19 kernel: OC/UC/UV, repartition, flashing
 
+## Session 2026-10-15 — folio MGLRU dropped, page-based MGLRU fixed, process_madvise
+
+Running on boot_b: `4.19.325-cip136-st20-perf-mglru-next-g5835eacd666d`
+(flashed, not `fastboot boot`). Page-based MGLRU on (`enabled=0x0001`),
+process_madvise backported, Android app compaction active. Details and data
+in [mglru-next-port.md](mglru-next-port.md#device-results-2026-10-15).
+
+- **Folio MGLRU removed from `oc-test-2ghz`** by revert commits (no history
+  rewrite): it thrashed anon memory on this A53 (33.4 s / 39 kills vs 22.0 s
+  / 14 kills with MGLRU off). `mglru-next` was already an ancestor, so the
+  reverts restore its page-based code exactly; only process_madvise touches
+  mm/ beyond it.
+- **process_madvise + MADV_COLD/MADV_PAGEOUT backported** (`c83f4bcf3eee`).
+  Android 17's CachedAppOptimizer needs it; without it app compaction was a
+  silent no-op. On-device check: `scripts/test-process-madvise.c`.
+- **Eight upstream MGLRU fixes ported to the page-based code**
+  (`9982c5fe0ebc`..`97d59665f232`), including the memcg_lru lock IRQ-safety
+  deadlock and the state-switching race.
+- **Runtime off-switch livelock fixed**: on the unfixed page-based kernel,
+  `echo 0 > /sys/kernel/mm/lru_gen/enabled` right after boot left kswapd at
+  100% CPU with all reclaim counters frozen (PSI full 92%, lmkd kills,
+  Magisk daemon killed). Same reproduction on `g5835eacd666d`: kswapd
+  finishes in ~30 s and goes idle, PSI full 0.4%.
+- **Launch-test workflow notes**: run at uptime ~105 s; first wake the screen
+  and dismiss the keyguard (`input keyevent KEYCODE_WAKEUP; wm
+  dismiss-keyguard; cmd statusbar collapse`) or the first `am start` fails on
+  a focused `NotificationShade`. `out` in the repo root is currently the
+  pulled `Image.gz-dtb` file, not a directory, so pass `OUT_DIR` elsewhere.
+- **Boot images and results** live outside the repo:
+  `../tissot-boot-images/` (original boot_b backup
+  `boot_b_before-mglru-d79f823_64b6050e.img`, every flashed image) and
+  `../tissot-memory-tests/`.
+- **Open**: repeat runs to settle page-based MGLRU+compaction vs MGLRU
+  off+compaction (one run each so far); zram idle recompression; PSI fixes
+  from 5.4/5.10 stable.
+
 ## Session 2026-10-08 night — ThinLTO boot test (LTO validated, CFI dropped)
 
 Follows the backport-execution session below; nothing was flashed, the phone

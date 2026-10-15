@@ -208,3 +208,70 @@ port from — they would be new drivers plus DT written against the fork's
 binding, on a CAF 4.19 vendor stack. Out of scope. Haptics is the only one
 with a plausible future home, and it belongs to the ACK 6.18 route where the
 `msm8953-mainline` 7.1.3 line is an actual donor.
+
+## Device results (2026-10-15)
+
+All runs: `scripts/test-tissot-memory.sh`, swappiness 100, watermark scale
+200, fresh boot, test started at uptime ~105 s. One run per row, so treat
+differences of a few hundred ms as noise. Logs: `../tissot-memory-tests/`.
+
+| kernel | MGLRU | app compaction | launch sum | median / worst | lmkd kills | apps kept |
+| --- | --- | --- | --- | --- | --- | --- |
+| folio `0eb0748` | on | no | 33.4 s | 1407 / 10077 ms | 39 | 3/13 |
+| folio `0eb0748` | off | no | 22.0 s | 1147 / 8806 ms | 14 | 13/13 |
+| Oct 9 ROM kernel `g0e5fe63` | none | no | 22.1 s | 1028 / 9228 ms | 16 | 13/13 |
+| folio `8d0586d` | off | yes | 13.8 s | 841 / 3074 ms | 0 | 13/13 |
+| folio `8d0586d` | on + walk `0x3` | yes | 44.0 s | 2091 / 11363 ms | 95 | 2/13 |
+| page-based `577f0ee` | on | no | 14.7 s | 914 / 2892 ms | 0 | 13/13 |
+| page-based + fixes `5835eac` | on | yes | 17.9 s | 893 / 6486 ms | 15 | 13/13 |
+
+Findings:
+
+- **The folio port thrashes on this A53.** With MGLRU on it swapped app
+  memory out and straight back in: 440k swap-ins and 445k major faults in
+  two minutes vs 21k and 34k with MGLRU off. The page-based port does not.
+  The folio port was reverted from `oc-test-2ghz`.
+- **The page-table walk works without a hardware access flag but does not
+  pay off.** The access flag is maintained by access-flag faults, so the
+  2026-10-08 "walk impossible" verdict (in the reverted folio docs) was wrong
+  in mechanism; forcing it on (`0x3`) cost 11.3M minor faults and was the
+  worst run.
+- **process_madvise is the largest single win.** Android's CachedAppOptimizer
+  compacts cached apps with `process_madvise(MADV_PAGEOUT)`; this tree only
+  had CAF's `/proc/<pid>/reclaim`. With the backport, 84–85 compactions run
+  during the test.
+- `5835eac`'s higher sum is almost entirely the first, cold Chrome launch
+  (6.5 s); all 15 kills hit leftover boot-time processes in the first 20 s.
+  The other 13 launches total 11.4 s. Needs repeat runs to call.
+
+### Upstream fixes ported to the page-based code
+
+Checked against every mainline `mm/vmscan.c` MGLRU fix since 2022-09. Already
+present from the android14-5.15 donor: per-zone reclaim, `inc_min_seq()`
+race, futile retries, CMA skip, cgroup-migration crash, `look_around()`
+`can_swap`, workingset accounting. Ported:
+
+| commit | upstream | fix |
+| --- | --- | --- |
+| `9982c5fe0ebc` | `8b671fe1a879` | div-by-zero in `vmpressure_calc_level()` |
+| `d1e109e8e67c` | `b130ba4a6259` | only clear `kswapd_failures` if reclaimable |
+| `270797add3ae` | `814bc1de03ea` | memcg_lru lock IRQ-safe (deadlock via `memcg_check_events()`) |
+| `4e02ec83e8e6` | `6867c7a33206` | don't spin during memcg release |
+| `407d8acc85b3` | `3f74e6bd3b84` | shrinker overshoot from priority 0 |
+| `3410d2f3ee34` | `081488051d28` | underprotected page cache |
+| `e28ed116dfa8` | `f1001f3d3b68` | reset tier bits when activating |
+| `97d59665f232` | `a6a8c087dce0` | reclaim vacuum during the on/off switch |
+
+Deferred as larger restructurings: try to stop at high watermarks
+(`5095a2b23987`), min_ttl_ms with memcgs (`8aa420617918`), reclaim offlined
+memcgs harder (`4376807bf2d5`), protection calculation (`30d77b7eef01`).
+
+### Runtime off-switch livelock
+
+Before the fixes, `echo 0 > /sys/kernel/mm/lru_gen/enabled` within a minute
+of boot left kswapd spinning in `shrink_inactive_list()` (sysrq-l backtrace)
+with pgscan/pgrefill/pgdeactivate all frozen, i.e. isolating nothing from an
+inactive list whose size counters said ~600 MB, while `shrink_active_list()`
+never ran. The same command at 5 min uptime was fine. With `5835eac` the
+boot-time reproduction completes: ~950k pages deactivated, kswapd idle after
+~30 s, PSI full 0.4%. Which of the fixes cured it was not bisected.
