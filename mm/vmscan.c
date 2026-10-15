@@ -3832,7 +3832,7 @@ static bool inc_min_seq(struct lruvec *lruvec, int type, bool can_swap)
 
 			/* don't count the workingset being lazily promoted */
 			if (refs != BIT(LRU_REFS_WIDTH) || !workingset) {
-				int tier = lru_tier_from_refs(refs);
+				int tier = lru_tier_from_refs(refs, workingset);
 				int delta = folio_nr_pages(folio);
 
 				WRITE_ONCE(lrugen->protected[hist][type][tier],
@@ -4383,7 +4383,7 @@ static bool sort_folio(struct lruvec *lruvec, struct page *folio, struct scan_co
 	int delta = folio_nr_pages(folio);
 	int refs = folio_lru_refs(folio);
 	bool workingset = folio_test_workingset(folio);
-	int tier = lru_tier_from_refs(refs);
+	int tier = lru_tier_from_refs(refs, workingset);
 	struct lru_gen_folio *lrugen = &lruvec->lrugen;
 
 	VM_WARN_ON_ONCE_PAGE(gen >= MAX_NR_GENS, folio);

@@ -63,6 +63,9 @@ static int rcu_depth;
 enum { WORKINGSET_REFAULT, WORKINGSET_ACTIVATE, WORKINGSET_RESTORE };
 #define PageWorkingset(p) (!!((p)->flags & BIT(PG_workingset)))
 #define SetPageWorkingset(p) ((p)->flags |= BIT(PG_workingset))
+#define folio_set_workingset(p) SetPageWorkingset(p)
+#define folio_test_workingset(p) PageWorkingset(p)
+#define set_mask_bits(ptr, mask, bits) (*(ptr) = (*(ptr) & ~(mask)) | (bits))
 #define PageSwapCache(p) ((p)->swapcache)
 static unsigned long page_private(struct page *p) { return p->private; }
 static unsigned short lookup_swap_cgroup_id(swp_entry_t entry) {
@@ -73,6 +76,7 @@ static void *xa_mk_value(unsigned long v) { return (void *)((v << 1) | 1); }
 static unsigned long xa_to_value(void *p) { return (uintptr_t)p >> 1; }
 static int order_base_2(unsigned long n) {
     int order = 0;
+    if (n <= 1) return 0;
     for (n--; n; n >>= 1) order++;
     return order;
 }
@@ -120,12 +124,16 @@ code += '\n' + function('mm/workingset.c', 'void lru_gen_refault(')
 code += r'''
 int main(void) {
     struct page page = {.node = &nodes[0], .memcg = &groups[0], .nr = 1};
-    const int tiers[] = {0, 1, 2, 2, 3};
+    /* refs 0 and 1 share the first tier; PG_workingset always means the last. */
+    const int tiers[] = {0, 0, 1, 2, 2};
+    for (int ws = 0; ws <= 1; ws++)
     for (int refs = 0; refs <= 4; refs++) {
-        page.flags = refs ? BIT(PG_workingset) | BIT(PG_referenced) |
-                     ((unsigned long)(refs - 1) << LRU_REFS_PGOFF) : 0;
+        unsigned long low = refs ? (unsigned long)refs - 1 : 0;
+        int tier = ws ? 3 : tiers[refs];
+        page.flags = (ws ? BIT(PG_workingset) : 0) |
+                     (refs ? BIT(PG_referenced) | (low << LRU_REFS_PGOFF) : 0);
         assert(folio_lru_refs(&page) == refs);
-        assert(lru_tier_from_refs(refs) == tiers[refs]);
+        assert(lru_tier_from_refs(refs, ws) == tier);
         struct lruvec *v = &lruvecs[0][0];
         memset(v, 0, sizeof(*v));
         v->lrugen.min_seq[1] = 7;
@@ -134,15 +142,19 @@ int main(void) {
         int id; pg_data_t *node; unsigned long token; bool workingset;
         unpack_shadow(shadow, &id, &node, &token, &workingset);
         assert(id == 17 && node == &nodes[0]);
-        assert(token == (28UL | (refs ? (unsigned long)refs - 1 : 0)));
-        assert(workingset == (bool)refs);
-        assert(v->lrugen.evicted[0][1][tiers[refs]] == 1);
+        assert(token == (28UL | low));
+        assert(workingset == ws);
+        assert(v->lrugen.evicted[0][1][tier] == 1);
         page.flags = 0;
         lru_gen_refault(&page, shadow);
-        assert(v->lrugen.refaulted[0][1][tiers[refs]] == 1);
+        assert(v->lrugen.refaulted[0][1][tier] == 1);
         assert(v->stats[WORKINGSET_REFAULT] == 1);
-        assert(v->stats[WORKINGSET_ACTIVATE] == 1);
-        assert(PageWorkingset(&page) == (refs == 4));
+        /* activation is counted only for refaults inside a page fault */
+        assert(v->stats[WORKINGSET_ACTIVATE] == 0);
+        assert(v->stats[WORKINGSET_RESTORE] == ws);
+        assert(PageWorkingset(&page) == ws);
+        /* without PG_workingset the access count is carried to the new page */
+        assert((page.flags & LRU_REFS_MASK) == (ws ? 0 : low << LRU_REFS_PGOFF));
         assert(!rcu_depth);
     }
 
@@ -205,7 +217,7 @@ int main(void) {
     lru_gen_refault(&page, shadow);
     assert(v->lrugen.refaulted[0][1][3] == 512);
 
-    /* Memcg-disabled anonymous refault, including a page-table stall. */
+    /* Memcg-disabled anonymous refault inside a fault: activated, not workingset. */
     disabled = true;
     in_fault = true;
     page.flags = BIT(PG_swapbacked);
@@ -216,7 +228,8 @@ int main(void) {
     shadow = lru_gen_eviction(&page);
     lru_gen_refault(&page, shadow);
     assert(root.lrugen.refaulted[0][0][0] == 1);
-    assert(root.stats[WORKINGSET_RESTORE] == 1 && PageWorkingset(&page));
+    assert(root.stats[WORKINGSET_ACTIVATE] == 1);
+    assert(!root.stats[WORKINGSET_RESTORE] && !PageWorkingset(&page));
     assert(!rcu_depth);
 
     /*

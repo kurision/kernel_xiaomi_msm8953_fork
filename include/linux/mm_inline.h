@@ -136,12 +136,12 @@ static inline int lru_hist_from_seq(unsigned long seq)
 	return seq % NR_HIST_GENS;
 }
 
-static inline int lru_tier_from_refs(int refs)
+static inline int lru_tier_from_refs(int refs, bool workingset)
 {
 	VM_WARN_ON_ONCE(refs > BIT(LRU_REFS_WIDTH));
 
-	/* see the comment in folio_lru_refs() */
-	return order_base_2(refs + 1);
+	/* see the comment on MAX_NR_TIERS */
+	return workingset ? MAX_NR_TIERS - 1 : order_base_2(refs);
 }
 
 static inline int folio_lru_refs(struct page *page)
