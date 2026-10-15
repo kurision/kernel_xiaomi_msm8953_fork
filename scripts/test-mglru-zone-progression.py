@@ -105,8 +105,8 @@ static void list_move_tail(struct list_head *item, struct list_head *head)
 }
 static int lru_gen_from_seq(unsigned long seq) { return seq % MAX_NR_GENS; }
 static int lru_hist_from_seq(unsigned long seq) { return seq % NR_HIST_GENS; }
-static int order_base_2(unsigned long n) { int o = 0; if (n <= 1) return 0; for (n--; n; n >>= 1) o++; return o; }
-static int lru_tier_from_refs(int refs, bool workingset) { return workingset ? 3 : order_base_2(refs); }
+static int order_base_2(unsigned long n) { int o = 0; for (n--; n; n >>= 1) o++; return o; }
+static int lru_tier_from_refs(int refs) { return order_base_2(refs + 1); }
 static int folio_lru_refs(struct page *p) { (void)p; return 0; }
 static int folio_nr_pages(struct page *p) { (void)p; return 1; }
 static bool folio_test_workingset(struct page *p) { (void)p; return false; }

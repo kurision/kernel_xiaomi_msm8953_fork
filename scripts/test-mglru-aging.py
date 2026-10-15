@@ -30,7 +30,6 @@ code = r'''
 #define BIT(n) (1UL << (n))
 #define BIT_I(n) (1 << (n))
 #define MAX_NR_GENS 4
-#define MAX_NR_TIERS 4
 #define MIN_NR_GENS 2
 #define ANON_AND_FILE 2
 #define MAX_NR_ZONES 2
@@ -125,7 +124,7 @@ static void __update_lru_size(struct lruvec *lv, enum lru_list lru, int zone, in
     lv->node[lru] += n;
     lv->zone[zone][lru] += n;
 }
-static int order_base_2(unsigned long n) { int o = 0; if (n <= 1) return 0; for (n--; n; n >>= 1) o++; return o; }
+static int order_base_2(unsigned long n) { int o = 0; for (n--; n; n >>= 1) o++; return o; }
 
 /* Injected cmpxchg contention, mirroring a concurrent aging promotion. */
 static bool inject_retry;
