@@ -34,7 +34,7 @@ static struct mem_cgroup group = {.id_live = 1};
 #define spin_lock(lock) ((void)(lock))
 #define spin_unlock(lock) ((void)(lock))
 #define list_for_each_entry_safe(event, tmp, head, member) \
-    for ((event) = NULL, (tmp) = NULL; (void)(tmp), (event) != NULL; )
+    for ((event) = NULL, (tmp) = NULL; (event) != NULL; (event) = (tmp))
 static void list_del_init(void *entry) { (void)entry; }
 static void page_counter_set_min(int *counter, int value) { (void)counter; (void)value; }
 static void page_counter_set_low(int *counter, int value) { (void)counter; (void)value; }
