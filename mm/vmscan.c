@@ -1200,7 +1200,7 @@ static unsigned long shrink_page_list(struct list_head *page_list,
 			goto keep_locked;
 
 		/* page_update_gen() tried to promote this page? */
-		if (lru_gen_enabled() && !force_reclaim &&
+		if (lru_gen_enabled() && !lru_gen_switching() && !force_reclaim &&
 		    page_mapped(page) && PageReferenced(page))
 			goto keep_locked;
 
@@ -2590,6 +2590,8 @@ static bool skip_cma(struct page *page, struct scan_control *sc)
 #endif /* CONFIG_LRU_GEN_ENABLED */
 
 #ifdef CONFIG_LRU_GEN
+
+DEFINE_STATIC_KEY_FALSE(lru_switch);
 
 #ifdef CONFIG_LRU_GEN_ENABLED
 DEFINE_STATIC_KEY_ARRAY_TRUE(lru_gen_caps, NR_LRU_GEN_CAPS);
@@ -4973,6 +4975,8 @@ static void lru_gen_change_state(bool enabled)
 	if (enabled == lru_gen_enabled())
 		goto unlock;
 
+	static_branch_enable_cpuslocked(&lru_switch);
+
 	if (enabled)
 		static_branch_enable_cpuslocked(&lru_gen_caps[LRU_GEN_CORE]);
 	else
@@ -5006,6 +5010,9 @@ static void lru_gen_change_state(bool enabled)
 
 		cond_resched();
 	} while ((memcg = mem_cgroup_iter(NULL, memcg, NULL)));
+
+	static_branch_disable_cpuslocked(&lru_switch);
+
 unlock:
 	mutex_unlock(&state_mutex);
 	put_online_mems();
@@ -5631,9 +5638,11 @@ static void shrink_node_memcg(struct pglist_data *pgdat, struct mem_cgroup *memc
 	struct blk_plug plug;
 	bool scan_adjusted;
 
-	if (lru_gen_enabled() && !global_reclaim(sc)) {
+	if ((lru_gen_enabled() || lru_gen_switching()) && !global_reclaim(sc)) {
 		lru_gen_shrink_lruvec(lruvec, sc);
-		return;
+
+		if (!lru_gen_switching())
+			return;
 	}
 
 	get_scan_count(lruvec, memcg, sc, nr, lru_pages);
@@ -5835,10 +5844,12 @@ static bool shrink_node(pg_data_t *pgdat, struct scan_control *sc)
 	unsigned long nr_reclaimed, nr_scanned;
 	bool reclaimable = false;
 
-	if (lru_gen_enabled() && global_reclaim(sc)) {
+	if ((lru_gen_enabled() || lru_gen_switching()) && global_reclaim(sc)) {
 		nr_reclaimed = sc->nr_reclaimed;
 		lru_gen_shrink_node(pgdat, sc);
-		return sc->nr_reclaimed > nr_reclaimed;
+
+		if (!lru_gen_switching())
+			return sc->nr_reclaimed > nr_reclaimed;
 	}
 
 	do {
