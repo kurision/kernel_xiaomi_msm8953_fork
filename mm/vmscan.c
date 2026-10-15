@@ -1620,7 +1620,7 @@ unsigned long reclaim_clean_pages_from_list(struct zone *zone,
 	return ret;
 }
 
-#ifdef CONFIG_PROCESS_RECLAIM
+/* used by /proc/<pid>/reclaim and MADV_PAGEOUT */
 unsigned long reclaim_pages_from_list(struct list_head *page_list,
 					struct vm_area_struct *vma)
 {
@@ -1652,7 +1652,6 @@ unsigned long reclaim_pages_from_list(struct list_head *page_list,
 
 	return nr_reclaimed;
 }
-#endif
 
 /*
  * Attempt to remove the specified page from its LRU.  Only take this page

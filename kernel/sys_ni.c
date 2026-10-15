@@ -441,3 +441,6 @@ COND_SYSCALL(rseq);
 
 /* mm/oom_kill.c */
 COND_SYSCALL(process_mrelease);
+
+/* mm/madvise.c */
+COND_SYSCALL(process_madvise);
