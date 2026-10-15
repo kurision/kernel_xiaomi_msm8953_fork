@@ -60,6 +60,7 @@ static int rcu_depth;
 enum { WORKINGSET_REFAULT, WORKINGSET_ACTIVATE, WORKINGSET_RESTORE };
 #define PageWorkingset(p) (!!((p)->flags & BIT(PG_workingset)))
 #define SetPageWorkingset(p) ((p)->flags |= BIT(PG_workingset))
+#define set_mask_bits(ptr, mask, bits) (*(ptr) = (*(ptr) & ~(mask)) | (bits))
 #define PageSwapCache(p) ((p)->swapcache)
 static unsigned long page_private(struct page *p) { return p->private; }
 static unsigned short lookup_swap_cgroup_id(swp_entry_t entry) {
@@ -138,7 +139,7 @@ int main(void) {
         assert(v->lrugen.refaulted[0][1][tiers[refs]] == 1);
         assert(v->stats[WORKINGSET_REFAULT] == 1);
         assert(v->stats[WORKINGSET_ACTIVATE] == 1);
-        assert(PageWorkingset(&page) == (refs == 4));
+        assert(PageWorkingset(&page) == (refs >= 3));
         assert(!rcu_depth);
     }
 
