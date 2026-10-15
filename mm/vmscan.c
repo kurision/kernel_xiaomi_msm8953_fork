@@ -1067,15 +1067,6 @@ enum page_references {
 	PAGEREF_ACTIVATE,
 };
 
-#ifdef CONFIG_LRU_GEN
-static bool lru_gen_set_refs(struct page *folio);
-#else
-static bool lru_gen_set_refs(struct page *folio)
-{
-	return false;
-}
-#endif
-
 static enum page_references page_check_references(struct page *page,
 						  struct scan_control *sc)
 {
@@ -1084,6 +1075,7 @@ static enum page_references page_check_references(struct page *page,
 
 	referenced_ptes = page_referenced(page, 1, sc->target_mem_cgroup,
 					  &vm_flags);
+	referenced_page = TestClearPageReferenced(page);
 
 	/*
 	 * Mlock lost the isolation race with us.  Let try_to_unmap()
@@ -1091,16 +1083,6 @@ static enum page_references page_check_references(struct page *page,
 	 */
 	if (vm_flags & VM_LOCKED)
 		return PAGEREF_RECLAIM;
-
-	/* see the comment on LRU_REFS_FLAGS */
-	if (lru_gen_enabled()) {
-		if (!referenced_ptes)
-			return PAGEREF_RECLAIM;
-
-		return lru_gen_set_refs(page) ? PAGEREF_ACTIVATE : PAGEREF_KEEP;
-	}
-
-	referenced_page = TestClearPageReferenced(page);
 
 	if (referenced_ptes) {
 		if (PageSwapBacked(page))
@@ -1219,6 +1201,11 @@ static unsigned long shrink_page_list(struct list_head *page_list,
 			goto activate_locked;
 
 		if (!sc->may_unmap && page_mapped(page))
+			goto keep_locked;
+
+		/* page_update_gen() tried to promote this page? */
+		if (lru_gen_enabled() && !force_reclaim &&
+		    page_mapped(page) && PageReferenced(page))
 			goto keep_locked;
 
 		/* Double the slab pressure for mapped and swapcache pages */
